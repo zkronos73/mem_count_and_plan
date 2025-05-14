@@ -4,7 +4,7 @@
 CXX := g++
 
 # Opcions de compilació
-CXXFLAGS := -g -O3 -std=c++11 -Wall -Wextra -pthread
+CXXFLAGS := -g -O3 -std=c++17 -Wall -Wextra -pthread
 
 # Nom de l'executable
 TARGET := mem_count_and_plan
@@ -16,7 +16,7 @@ SRCS := main.cpp
 all: $(TARGET)
 
 # Regla per compilar
-$(TARGET): $(SRCS)
+$(TARGET): $(SRCS) *.hpp
 	$(CXX) $(CXXFLAGS) -o $@ $^
 
 # Regla per executar

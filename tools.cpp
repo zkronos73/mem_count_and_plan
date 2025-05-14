@@ -11,9 +11,9 @@
 #include <sys/time.h>
 #include <vector>
 
+#include "mem_types.hpp"
 
 #define MEM_BUS_DATA_SIZE 7 // Replace with your actual size
-#define MAX_CHUNKS 4096
 
 typedef struct {
     uint64_t data[MEM_BUS_DATA_SIZE];
@@ -102,7 +102,7 @@ void convert_to_compact(void){
 }
 
 
-inline uint32_t addr_to_offset(uint32_t addr, uint32_t chunk_id = 0, uint32_t index = 0) {
+inline uint32_t addr_to_offset_2(uint32_t addr, uint32_t chunk_id = 0, uint32_t index = 0) {
     switch((uint8_t)((addr >> 24) & 0xFE)) {
         case 0x80: return ((addr - 0x80000000) >> (ADDR_LOW_BITS));
         case 0x82: return ((addr - 0x82000000) >> (ADDR_LOW_BITS)) + ADDR_PAGE_SIZE;
@@ -154,7 +154,7 @@ inline uint32_t addr_to_offset(uint32_t addr, uint32_t chunk_id = 0, uint32_t in
     exit(1);
 }
 
-inline uint32_t addr_to_page(uint32_t addr, uint32_t chunk_id = 0, uint32_t index = 0) {
+inline uint32_t addr_to_page_2(uint32_t addr, uint32_t chunk_id = 0, uint32_t index = 0) {
     switch((uint8_t)((addr >> 24) & 0xFE)) {
         case 0x80: return 0;
         case 0x82: return 1;
