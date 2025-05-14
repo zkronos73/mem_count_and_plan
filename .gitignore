@@ -30,3 +30,7 @@
 *.exe
 *.out
 *.app
+
+tmp/*
+mem_count_and_plan
+.vscode/*
