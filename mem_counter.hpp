@@ -40,7 +40,8 @@ public:
         addr_table = (uint32_t *)malloc(ADDR_TABLE_SIZE * sizeof(uint32_t));
         memset(addr_table, 0, ADDR_TABLE_SIZE * sizeof(uint32_t));
 
-        addr_slots = (uint32_t *)malloc(ADDR_SLOTS_SIZE * sizeof(uint32_t));
+        // addr_slots = (uint32_t *)malloc(ADDR_SLOTS_SIZE * sizeof(uint32_t));
+        addr_slots = (uint32_t *)std::aligned_alloc(64, ADDR_SLOTS_SIZE * sizeof(uint32_t));
         // memset(addr_slots, 0, ADDR_SLOTS_SIZE * sizeof(uint32_t));
         free_slot = 0;
         addr_count = 0;
@@ -180,6 +181,18 @@ public:
     uint32_t get_ellapsed_ms() {
         return ellapsed_ms;
     }
+    inline static uint32_t offset_to_page(uint32_t offset) {
+        return (offset >> ADDR_PAGE_BITS);
+    }
+/*
+    inline static void offset_info(uint32_t offset, uint32_t &page, uint32_t &addr) {
+        page = offset >> ADDR_PAGE_BITS;
+        uint32_t base_addr = page_to_addr(page);
+        addr = offset & ADDR_MASK + base_addr;
+        chunk_id = (offset << ADDR_LOW_BITS) & 0x1F;
+        index = offset & ADDR_MASK;
+    }
+*/
     inline static uint32_t addr_to_offset(uint32_t addr, uint32_t chunk_id = 0, uint32_t index = 0) {
         switch((uint8_t)((addr >> 24) & 0xFC)) {
             case 0x80: return ((addr - 0x80000000) >> (ADDR_LOW_BITS));

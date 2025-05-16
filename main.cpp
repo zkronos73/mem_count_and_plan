@@ -14,6 +14,8 @@
 #include <map>
 #include <unordered_map>
 #include <stdexcept>
+#include <mutex>
+#include <atomic>
 
 #include "mem_types.hpp"
 #include "mem_config.hpp"
@@ -84,6 +86,60 @@ public:
     }
 };
 
+struct MemLocator {
+    uint32_t offset;
+    uint32_t cpos;
+    // uint32_t count;
+    uint32_t skip;
+};
+
+
+#define MAX_LOCATORS 1024
+
+class MemLocators {
+public:
+    std::atomic<size_t> write_pos{0};
+    std::atomic<size_t> read_pos{0};
+    std::atomic<bool> completed{false};
+    MemLocator locators[MAX_LOCATORS];
+    MemLocators() {
+    }
+    void push_locator(uint32_t offset, uint32_t cpos, uint32_t skip) {
+        size_t pos = write_pos.load(std::memory_order_relaxed);
+        if (pos >= MAX_LOCATORS) {
+            throw std::runtime_error("Max locators reached");
+        }
+        locators[pos].offset = offset;
+        locators[pos].cpos = cpos;
+        // locators[pos].count = count; // no necessary
+        locators[pos].skip = skip;
+        write_pos.store(pos + 1, std::memory_order_relaxed);
+    }
+    MemLocator *get_locator() {
+        size_t current_read = read_pos.load(std::memory_order_relaxed);
+        size_t current_write;
+        MemLocator *item;
+
+        do {
+            current_write = write_pos.load(std::memory_order_acquire);
+            if (current_read == current_write) return nullptr;
+            item = &locators[current_read];
+        } while (!read_pos.compare_exchange_weak(
+            current_read,
+            current_read + 1,
+            std::memory_order_release,
+            std::memory_order_relaxed
+        ));
+        return item;
+    }
+    void set_completed() {
+        completed.store(true, std::memory_order_release);
+    }
+    void is_completed() {
+        completed.store(true, std::memory_order_release);
+    }
+};
+
 #define NO_CHUNK_ID 0xFFFFFFFF
 class MemPlanner {
 private:
@@ -106,6 +162,10 @@ private:
     uint32_t large_segments;
     uint32_t tot_chunks;
     #endif
+    #ifdef DIRECT_MEM_LOCATOR
+    MemLocator locators[MAX_CHUNKS];
+    uint32_t locators_count;
+    #endif
     bool intermediate_step_reads;
     MemSegment *current_segment;
     std::vector<MemSegment *> segments;
@@ -119,6 +179,9 @@ public:
         reference_skip = 0;
         last_chunk = NO_CHUNK_ID;
         current_chunk = NO_CHUNK_ID;
+        #ifdef DIRECT_MEM_LOCATOR
+        locators_count = 0;
+        #endif
         current_segment = new MemSegment();
         from_page = MemCounter::addr_to_page(from_addr);
         to_page = MemCounter::addr_to_page(from_addr + (mb_size * 1024 * 1024) - 1);
@@ -168,6 +231,132 @@ public:
         printf("MemPlanner::execute  segments:%d tot_chunks:%d max_chunks:%d large_segments:%d avg_chunks:%04.2f\n", segments.size(), tot_chunks, max_chunks, large_segments, ((double)tot_chunks)/((double)(segments.size())));
         #endif
     }
+/*
+    void execute_from_locators(const std::vector<MemCounter *> &workers, MemLocators &locators) {
+        uint32_t max_addr;
+        uint32_t addr = 0;
+        MemLocator *plocator;
+        uint32_t max_offset = 0;
+        uint32_t offset = 0;
+        bool completed = false;
+
+        while (true) {
+            plocator = locators.get_locator();
+            if (plocator == nullptr) {
+                if (completed) {
+                    usleep(1000);
+                    break;
+                } else {
+                    completed = true;
+                }
+            }
+            uint32_t skip = plocator->skip;
+            uint32_t locator_page = MemCounter::offset_to_page(plocator->offset);
+            bool first_loop = true;
+            for (uint32_t page = locator_page; page < to_page; ++page) {
+                if (first_loop) {
+                    offset = plocator->offset;
+                    addr = MemCounter::offset_to_addr(offset);
+                } else {
+                    if (!(max_addr = get_max_addr(workers, page))) continue;
+                    addr = MemCounter::page_to_addr(page);
+                    max_offset = MemCounter::addr_to_offset(max_addr);
+                    offset = page * ADDR_PAGE_SIZE;
+                }
+                for (;offset <= max_offset; ++offset) {
+                    for (uint32_t i = 0; i < MAX_THREADS; ++i, ++addr) {
+                        uint32_t pos = workers[i]->get_addr_table(offset);
+                        if (pos == 0) continue;
+                        uint32_t cpos = workers[i]->get_initial_pos(pos);
+                        while (cpos != 0) {
+                            uint32_t chunk_id = workers[i]->get_pos_value(cpos);
+                            uint32_t count = workers[i]->get_pos_value(cpos+1);
+                            add_to_current_segment(chunk_id, addr, count, skip);
+                            skip = 0;
+                            if (cpos == pos) break;
+                            cpos = workers[i]->get_next_pos(cpos+1);
+                        }
+                    }
+                }
+                first_loop = false;
+            }
+        }
+        close_last_segment();
+        #ifdef SEGMENT_STATS
+        printf("MemPlanner::execute  segments:%d tot_chunks:%d max_chunks:%d large_segments:%d avg_chunks:%04.2f\n", segments.size(), tot_chunks, max_chunks, large_segments, ((double)tot_chunks)/((double)(segments.size())));
+        #endif
+    }
+
+    void generate_locators(const std::vector<MemCounter *> &workers, MemLocators &locators) {
+        uint32_t max_addr;
+        uint32_t addr = 0;
+        rows_available = rows;
+        uint32_t count;
+        uint32_t p_chunk;
+        for (uint32_t page = from_page; page < to_page; ++page) {
+            if (!(max_addr = get_max_addr(workers, page))) continue;
+            addr = MemCounter::page_to_addr(page);
+            uint32_t max_offset = MemCounter::addr_to_offset(max_addr);
+            for (uint32_t offset = page * ADDR_PAGE_SIZE; offset <= max_offset; ++offset) {
+                for (uint32_t i = 0; i < MAX_THREADS; ++i, ++addr) {
+                    uint32_t pos = workers[i]->get_addr_table(offset);
+                    if (pos == 0) continue;
+                    uint32_t cpos = workers[i]->get_initial_pos(pos);
+                    if (cpos == 0) continue;
+                    count = workers[i]->get_pos_value(cpos+1);
+                    if (rows_available <= count) {
+                        #ifdef DIRECT_MEM_LOCATOR
+                        locators[locators_count].offset = offset;
+                        locators[locators_count].cpos = cpos;
+                        // locators[locators_count].count = count; // no necessary
+                        locators[locators_count].skip = rows_available;
+                        locators_count++;
+                        #else
+                        locators.push_locator(offset, cpos, rows_available);
+                        #endif
+                        rows_available = rows_available + rows - count;
+                    } else {
+                        rows_available -= count;
+                    }
+                    if (cpos == pos) continue;
+                    p_chunk = workers[i]->get_pos_value(cpos);
+                    cpos = workers[i]->get_next_pos(cpos+1);
+                    while (cpos != 0) {
+                        uint32_t chunk = workers[i]->get_pos_value(cpos);
+                        uint32_t count = workers[i]->get_pos_value(cpos+1);
+                        if ((chunk - p_chunk) > CHUNK_MAX_DISTANCE) {
+                            ++count;
+                        }
+                        if (rows_available <= count) {
+                            #ifdef DIRECT_MEM_LOCATOR
+                            locators[locators_count].offset =  offset;
+                            locators[locators_count].cpos = cpos;
+                            // locators[locators_count].count = count; // no necessary
+                            locators[locators_count].skip = rows_available;
+                            locators_count++;
+                            #else
+                            locators.push_locator(offset, cpos, rows_available);
+                            #endif
+                            rows_available = rows_available + rows - count;
+                        } else {
+                            rows_available -= count;
+                        }
+                        if (cpos == pos) break;
+                        p_chunk = chunk;
+                        cpos = workers[i]->get_next_pos(cpos+1);
+                    }
+                }
+            }
+        }
+        #ifdef DIRECT_MEM_LOCATOR
+        printf("MemPlanner::execute_fast: locators_count %d\n", locators_count);
+        #else
+        printf("MemPlanner::execute_fast: locators_count %d\n", locators.count);
+        #endif
+        #ifdef SEGMENT_STATS
+        printf("MemPlanner::execute  segments:%d tot_chunks:%d max_chunks:%d large_segments:%d avg_chunks:%04.2f\n", segments.size(), tot_chunks, max_chunks, large_segments, ((double)tot_chunks)/((double)(segments.size())));
+        #endif
+    }*/
     uint32_t get_max_addr(const std::vector<MemCounter *> &workers, uint32_t page) {
         uint32_t max_addr = workers[0]->last_addr[page];
         for (int i = 1; i < MAX_THREADS; ++i) {
@@ -355,6 +544,9 @@ public:
         }
         return intermediate_rows;
     }
+    void stats() {
+
+    }
 };
 
 int main() {
@@ -439,9 +631,11 @@ int main() {
     // planners.push_back(new MemPlanner(MEM_ROWS, 0x90000000, 128, false));
     planners.push_back(new MemPlanner(MEM_ROWS, 0xA0000000, 512, true));
 
+    MemLocators locators;
     std::vector<std::thread> planner_threads;
     for (int i = 0; i < planners.size(); ++i) {
-        planner_threads.emplace_back([planners, workers, i](){ planners[i]->execute(workers);});
+        // planner_threads.emplace_back([planners, workers, &locators, i](){ planners[i]->generate_locators(workers, locators);});
+        planner_threads.emplace_back([planners, workers, &locators, i](){ planners[i]->execute(workers);});
     }
     for (auto& t : planner_threads) {
         t.join();
