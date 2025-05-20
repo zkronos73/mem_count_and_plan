@@ -1,3 +1,6 @@
+#ifndef __MEM_COUNTER_HPP__
+#define __MEM_COUNTER_HPP__
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
@@ -18,48 +21,82 @@
 #include "mem_types.hpp"
 #include "tools.hpp"
 
+#ifdef USE_ADDR_COUNT_TABLE
+struct AddrCount {
+    uint32_t pos;
+    uint32_t count;
+};
+#define ADDR_TABLE_ELEMENT_SIZE sizeof(AddrCount)
+#else
+#define ADDR_TABLE_ELEMENT_SIZE sizeof(uint32_t)
+#endif
 class MemCounter {
 private:
-    const int id_;
+    const uint32_t id;
     const MemCountAndPlan *mcp;
 
     const int mcp_count;
     int count;
     int addr_count;
+
+    #ifdef USE_ADDR_COUNT_TABLE
+    AddrCount *addr_count_table;
+    #else
     uint32_t *addr_table;
+    #endif
     uint32_t *addr_slots;
     uint32_t current_index;
     uint32_t current_chunk;
     uint32_t free_slot;
     uint64_t init;
     uint32_t ellapsed_ms;
+    uint32_t tot_usleep;
+    uint32_t queue_full;
 public:
-    uint32_t last_addr[MAX_PAGES];
-    MemCounter(int id, const MemCountAndPlan *mcp, int count, uint64_t init) : id_(id), mcp(mcp), mcp_count(count), init(init) {
+    uint32_t first_offset[MAX_PAGES];
+    uint32_t last_offset[MAX_PAGES];
+    MemCounter(uint32_t id, const MemCountAndPlan *mcp, int count, uint64_t init) : id(id), mcp(mcp), mcp_count(count), init(init) {
         count = 0;
+        queue_full = 0;
+        tot_usleep = 0;
+        #ifdef USE_ADDR_COUNT_TABLE
+        addr_count_table = (AddrCount *)malloc(ADDR_TABLE_SIZE * sizeof(AddrCount));
+        memset(addr_count_table, 0, ADDR_TABLE_SIZE * sizeof(AddrCount));
+        #else
         addr_table = (uint32_t *)malloc(ADDR_TABLE_SIZE * sizeof(uint32_t));
         memset(addr_table, 0, ADDR_TABLE_SIZE * sizeof(uint32_t));
+        #endif
 
-        // addr_slots = (uint32_t *)malloc(ADDR_SLOTS_SIZE * sizeof(uint32_t));
+
+        // no memset because informations is overrided.
         addr_slots = (uint32_t *)std::aligned_alloc(64, ADDR_SLOTS_SIZE * sizeof(uint32_t));
-        // memset(addr_slots, 0, ADDR_SLOTS_SIZE * sizeof(uint32_t));
+
+        memset(first_offset, 0xFF, sizeof(first_offset));
+        memset(last_offset, 0, sizeof(first_offset));
+
         free_slot = 0;
         addr_count = 0;
     }
     uint32_t get_count() {
-        printf("Thread %d: count %d addr_count %d\n", id_, count, addr_count);
         return addr_count;
     }
     uint32_t get_used_slots() {
         return free_slot;
     }
+    uint32_t get_tot_usleep() {
+        return tot_usleep;
+    }
     ~MemCounter() {
+        #ifdef USE_ADDR_COUNT_TABLE
+        free(addr_count_table);
+        #else
         free(addr_table);
+        #endif
         free(addr_slots);
     }
     void execute() {
         const int chunks = mcp->chunks;
-        const uint32_t mask_value = id_ * 8;
+        const uint32_t mask_value = id * 8;
 
         for (int j = 0; j < chunks; ++j) {
             const uint32_t chunk_size = mcp->chunk_size[j];
@@ -94,11 +131,94 @@ public:
             uint64_t next_chunk = init + (uint64_t)(j+1) * TIME_US_BY_CHUNK;
             uint64_t current = get_usec();
             if (current < next_chunk) {
-                usleep(next_chunk - current);
+                tot_usleep += (next_chunk - current);
+                if (current < (next_chunk - 10)) {
+                    usleep(next_chunk - current - 10);
+                }
             }
         }
+        // compact();
         ellapsed_ms = ((get_usec() - init) / 1000);
     }
+    void compact(void) {
+        uint32_t *compact_addr_slots = (uint32_t *)std::aligned_alloc(64, free_slot * ADDR_SLOT_SIZE * sizeof(uint32_t));
+        uint32_t compact_pos = 0;
+        for (int page = 0; page < MAX_PAGES; ++page) {
+            int page_offset = page * ADDR_PAGE_SIZE;
+            uint32_t max_offset = last_offset[page];
+            if (max_offset == 0) {
+                continue;
+            }
+            uint32_t min_offset = first_offset[page];
+            for (uint32_t index = min_offset; index <= max_offset; ++index) {
+                uint32_t offset = page_offset + index;
+                #ifdef USE_ADDR_COUNT_TABLE
+                uint32_t pos = addr_count_table[offset].pos;
+                #else
+                uint32_t pos = addr_table[offset];
+                #endif
+                // printf("page: %d index: %d offset: %d => worker[%d] = pos: %d\n", page, index, offset, i, pos);
+                if (pos != 0) {
+                    uint32_t block = get_initial_block_pos(pos);
+                    uint32_t final_block = get_final_block_pos(pos);
+                    // uint32_t final_count = get_final_block_count(pos);
+                    while (true) {
+                        // TODO replace for addr
+                        compact_addr_slots[compact_pos] = offset;
+                        // TODO replace for next block, 0 if the last address block
+                        compact_addr_slots[compact_pos + 1] = 0;
+                        uint64_t *src = (uint64_t *)(&addr_slots[block + 2]);
+                        uint64_t *dst = (uint64_t *)(&compact_addr_slots[compact_pos + 2]);
+                        dst[0] = src[0];
+                        dst[1] = src[1];
+                        dst[2] = src[2];
+                        dst[3] = src[3];
+                        dst[4] = src[4];
+                        dst[5] = src[5];
+                        dst[6] = src[6];
+
+                        // compact_addr_slots[compact_pos + 2] = addr_slots[block + 2];
+                        // compact_addr_slots[compact_pos + 3] = addr_slots[block + 3];
+                        // compact_addr_slots[compact_pos + 4] = addr_slots[block + 4];
+                        // compact_addr_slots[compact_pos + 5] = addr_slots[block + 5];
+                        // compact_addr_slots[compact_pos + 6] = addr_slots[block + 6];
+                        // compact_addr_slots[compact_pos + 7] = addr_slots[block + 7];
+                        // compact_addr_slots[compact_pos + 8] = addr_slots[block + 8];
+                        // compact_addr_slots[compact_pos + 9] = addr_slots[block + 9];
+                        // compact_addr_slots[compact_pos + 10] = addr_slots[block + 10];
+                        // compact_addr_slots[compact_pos + 11] = addr_slots[block + 11];
+                        // compact_addr_slots[compact_pos + 12] = addr_slots[block + 12];
+                        // compact_addr_slots[compact_pos + 13] = addr_slots[block + 13];
+                        // compact_addr_slots[compact_pos + 14] = addr_slots[block + 14];
+                        // compact_addr_slots[compact_pos + 15] = addr_slots[block + 15];
+                        // memcpy(&addr_slots[block + 2], &compact_addr_slots[compact_pos + 2], (ADDR_SLOT_SIZE - 2) * sizeof(uint32_t));
+                        compact_pos += ADDR_SLOT_SIZE;
+                        if (block == final_block) break;
+                        block = get_next_block(block);
+                    }
+
+                }
+            }
+        }
+        free(addr_slots);
+        addr_slots = compact_addr_slots;
+    }
+    inline uint32_t get_initial_block_pos(uint32_t pos) {
+        uint32_t tpos = pos & ADDR_SLOT_MASK;
+        if (addr_slots[tpos] == 0) {
+            return tpos;
+        } else {
+            return addr_slots[tpos+1];
+        }
+    }
+    inline uint32_t get_final_block_pos(uint32_t pos) {
+        return pos & ADDR_SLOT_MASK;
+    }
+
+    inline uint32_t get_next_block(uint32_t pos) {
+        return addr_slots[pos+1];
+    }
+
     inline uint32_t get_initial_pos(uint32_t pos) {
         uint32_t tpos = pos & ADDR_SLOT_MASK;
         if (tpos >= ADDR_SLOTS_SIZE) {
@@ -116,6 +236,9 @@ public:
     inline uint32_t get_pos_value(uint32_t pos) {
         return addr_slots[pos];
     }
+    inline uint32_t get_queue_full_times() {
+        return queue_full;
+    }
     inline uint32_t get_next_pos(uint32_t pos) {
         int relative_pos = pos & (ADDR_SLOT_SIZE - 1);
         if (relative_pos < (ADDR_SLOT_SIZE - 1)) {
@@ -128,7 +251,19 @@ public:
         return 0;
     }
     inline uint32_t get_addr_table(uint32_t index) {
+        #ifdef USE_ADDR_COUNT_TABLE
+        return addr_count_table[index].pos;
+        #else
         return addr_table[index];
+        #endif
+    }
+    inline uint32_t get_count_table(uint32_t index) {
+        // return count_table[index];
+        #ifdef USE_ADDR_COUNT_TABLE
+        return addr_count_table[index].count;
+        #else
+        return addr_table[index];
+        #endif
     }
     inline uint32_t get_next_slot_pos() {
         // if (free_slot >= ADDR_SLOTS) {
@@ -144,20 +279,32 @@ public:
         //     printf("Error: offset %d out of bounds for addr 0x%X\n", offset, addr);
         //     return;
         // }
+        #ifdef USE_ADDR_COUNT_TABLE
+        uint32_t pos = addr_count_table[offset].pos;
+        #else
         uint32_t pos = addr_table[offset];
+        #endif
         if (pos == 0) {
             uint32_t pos = get_next_slot_pos();
             addr_slots[pos] = 0;
             addr_slots[pos + 1] = pos;
             addr_slots[pos + 2] = chunk_id;
             addr_slots[pos + 3] = count;
+            // addr_table[offset] = pos + 2;
+            #ifdef USE_ADDR_COUNT_TABLE
+            addr_count_table[offset].pos = pos + 2;
+            addr_count_table[offset].count = count;
+            #else
             addr_table[offset] = pos + 2;
+            #endif
             uint32_t page = offset >> ADDR_PAGE_BITS;
-            if (last_addr[page] < addr) {
-                last_addr[page] = addr;
-            }
+            first_offset[page] = std::min(first_offset[page], offset);
+            last_offset[page] = std::max(last_offset[page], offset);
             ++addr_count;
         } else {
+            #ifdef USE_ADDR_COUNT_TABLE
+            addr_count_table[offset].count += count;
+            #endif
             if (addr_slots[pos] == chunk_id) {
                 addr_slots[pos + 1] += count;
                 return;
@@ -170,12 +317,20 @@ public:
                 addr_slots[npos + 2] = chunk_id;
                 addr_slots[npos + 3] = count;
                 addr_slots[tpos + 1] = npos;
+                #ifdef USE_ADDR_COUNT_TABLE
+                addr_count_table[offset].pos = npos + 2;
+                #else
                 addr_table[offset] = npos + 2;
+                #endif
                 return;
             }
             addr_slots[pos + 2] = chunk_id;
             addr_slots[pos + 3] = count;
+            #ifdef USE_ADDR_COUNT_TABLE
+            addr_count_table[offset].pos = pos + 2;
+            #else
             addr_table[offset] = pos + 2;
+            #endif
         }
     }
     uint32_t get_ellapsed_ms() {
@@ -184,15 +339,19 @@ public:
     inline static uint32_t offset_to_page(uint32_t offset) {
         return (offset >> ADDR_PAGE_BITS);
     }
-/*
-    inline static void offset_info(uint32_t offset, uint32_t &page, uint32_t &addr) {
+
+    inline static void offset_info(uint32_t offset, uint32_t &page, uint32_t &addr, uint32_t thread_index) {
         page = offset >> ADDR_PAGE_BITS;
         uint32_t base_addr = page_to_addr(page);
-        addr = offset & ADDR_MASK + base_addr;
-        chunk_id = (offset << ADDR_LOW_BITS) & 0x1F;
-        index = offset & ADDR_MASK;
+        addr = (offset << ADDR_LOW_BITS) + base_addr + thread_index;
     }
-*/
+
+    inline static uint32_t offset_to_addr(uint32_t offset, uint32_t thread_index) {
+        uint32_t page = offset >> ADDR_PAGE_BITS;
+        uint32_t base_addr = page_to_addr(page);
+        return (offset << ADDR_LOW_BITS) + base_addr + thread_index;
+    }
+
     inline static uint32_t addr_to_offset(uint32_t addr, uint32_t chunk_id = 0, uint32_t index = 0) {
         switch((uint8_t)((addr >> 24) & 0xFC)) {
             case 0x80: return ((addr - 0x80000000) >> (ADDR_LOW_BITS));
@@ -216,8 +375,9 @@ public:
             case 0xD8: return ((addr - 0xD8000000) >> (ADDR_LOW_BITS)) + 18 * ADDR_PAGE_SIZE;
             case 0xDC: return ((addr - 0xDC000000) >> (ADDR_LOW_BITS)) + 19 * ADDR_PAGE_SIZE;
         }
-        printf("Error: addr_to_offset: 0x%X (%d:%d)\n", addr, chunk_id, index);
-        exit(1);
+        std::ostringstream msg;
+        msg << "ERROR: addr_to_offset: 0x" << std::hex << addr << " (" << std::dec << chunk_id << ":" << index << ")";
+        throw std::runtime_error(msg.str());
     }
 
     inline static uint32_t addr_to_page(uint32_t addr, uint32_t chunk_id = 0, uint32_t index = 0) {
@@ -243,8 +403,9 @@ public:
             case 0xD8: return 18;
             case 0xDC: return 19;
         }
-        printf("Error: addr_to_page: 0x%X (%d:%d)\n", addr, chunk_id, index);
-        exit(1);
+        std::ostringstream msg;
+        msg << "ERROR: addr_to_page: 0x" << std::hex << addr << " (" << std::dec << chunk_id << ":" << index << ")";
+        throw std::runtime_error(msg.str());
     }
     inline static uint32_t page_to_addr(uint8_t page) {
         switch(page) {
@@ -268,8 +429,11 @@ public:
             case 17: return 0xD4000000;
             case 18: return 0xD8000000;
             case 19: return 0xDC000000;
+            case 0xFF: return 0xFFFFFFFF;
         }
-        printf("Error: page_to_addr: %d\n", page);
-        exit(1);
+        std::ostringstream msg;
+        msg << "ERROR: page_to_address page:" << page;
+        throw std::runtime_error(msg.str());
     }
 };
+#endif
