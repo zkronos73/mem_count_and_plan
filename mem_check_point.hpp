@@ -12,18 +12,17 @@ class MemCheckPoint {
         uint32_t to_addr;
         uint32_t to_count;
         uint32_t count;
-        uint32_t intermediate_skip;
     public:
         #ifdef MEM_CHECK_POINT_MAP
-        MemCheckPoint(uint32_t from_addr, uint32_t skip, uint32_t count, uint32_t intermediate_skip) :
+        MemCheckPoint(uint32_t from_addr, uint32_t skip, uint32_t count) :
         #else
-        MemCheckPoint(uint32_t chunk_id, uint32_t from_addr, uint32_t skip, uint32_t count, uint32_t intermediate_skip) : chunk_id(chunk_id),
+        MemCheckPoint(uint32_t chunk_id, uint32_t from_addr, uint32_t skip, uint32_t count) : chunk_id(chunk_id),
         #endif
             from_addr(from_addr),
+            from_skip(skip),
             to_addr(from_addr),
             to_count(count),
-            count(count),
-            intermediate_skip(intermediate_skip) {
+            count(count) {
         }
         ~MemCheckPoint() {
         }

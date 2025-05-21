@@ -26,7 +26,6 @@
 #include "mem_locators.hpp"
 #include "mem_locator.hpp"
 
-#ifdef IMMUTABLE_MEM_PLANNER
 class ImmutableMemPlanner {
 private:
     uint32_t rows;
@@ -67,7 +66,6 @@ public:
         current_segment = new MemSegment();
         from_page = MemCounter::addr_to_page(from_addr);
         to_page = MemCounter::addr_to_page(from_addr + (mb_size * 1024 * 1024) - 1);
-        printf("MemPlanner: pages(%d-%d)\n", from_page, to_page);
         if (MemCounter::page_to_addr(from_page) != from_addr) {
             std::ostringstream msg;
             msg << "MemPlanner::constructor: from_addr " << std::hex << from_addr << " not aligned to page " << std::dec << from_page;
@@ -89,12 +87,16 @@ public:
     void execute(const std::vector<MemCounter *> &workers) {
         uint32_t max_addr;
         uint32_t addr = 0;
+        uint32_t offset;
+        uint32_t last_offset;
+        last_addr = MemCounter::page_to_addr(from_page);
         for (uint32_t page = from_page; page < to_page; ++page) {
-            if (!(max_addr = get_max_addr(workers, page))) continue;
-            addr = MemCounter::page_to_addr(page);
-            uint32_t max_offset = MemCounter::addr_to_offset(max_addr);
-            for (uint32_t offset = page * ADDR_PAGE_SIZE; offset <= max_offset; ++offset) {
-                for (uint32_t i = 0; i < MAX_THREADS; ++i, ++addr) {
+            get_offset_limits(workers, page, offset, last_offset);
+            // printf("##### page:%d offsets:0x%08X-0x%08X\n", page, offset, last_offset);
+            addr = MemCounter::offset_to_addr(offset, 0);
+            for (;offset <= last_offset; ++offset) {
+                // printf("offset:0x%08X page:%d addr:0x%08X segments:%d\n", offset, page, addr, segments.size());
+                for (uint32_t i = 0; i < MAX_THREADS; ++i, addr += 8) {
                     uint32_t pos = workers[i]->get_addr_table(offset);
                     if (pos == 0) continue;
                     uint32_t cpos = workers[i]->get_initial_pos(pos);
@@ -109,20 +111,17 @@ public:
             }
         }
         close_last_segment();
-        #ifdef SEGMENT_STATS
-        printf("MemPlanner::execute  segments:%d tot_chunks:%d max_chunks:%d large_segments:%d avg_chunks:%04.2f\n", segments.size(), tot_chunks, max_chunks, large_segments, ((double)tot_chunks)/((double)(segments.size())));
-        #endif
     }
 
-    uint32_t get_max_addr(const std::vector<MemCounter *> &workers, uint32_t page) {
-        uint32_t max_addr = workers[0]->last_addr[page];
+    void get_offset_limits(const std::vector<MemCounter *> &workers, uint32_t page, uint32_t &first_offset, uint32_t &last_offset) {
+        first_offset = workers[0]->first_offset[page];
+        last_offset = workers[0]->last_offset[page];
         for (int i = 1; i < MAX_THREADS; ++i) {
-            if (workers[i]->last_addr[page] > max_addr) {
-                max_addr = workers[i]->last_addr[page];
-            }
+            first_offset = std::min(first_offset, workers[i]->first_offset[page]);
+            last_offset = std::min(last_offset, workers[i]->last_offset[page]);
         }
-        return max_addr;
     }
+
     void add_to_current_segment(uint32_t chunk_id, uint32_t addr, uint32_t count) {
         set_current_chunk(chunk_id);
         uint32_t intermediate_rows = add_intermediates(addr);
@@ -169,9 +168,11 @@ public:
         close_segment(false);
         if (reference_addr_chunk != NO_CHUNK_ID) {
             #ifdef MEM_CHECK_POINT_MAP
-            current_segment->chunks.try_emplace(reference_addr_chunk, reference_addr, reference_skip, 0, intermediate_skip);
+            // current_segment->chunks.try_emplace(reference_addr_chunk, reference_addr, reference_skip, 0, intermediate_skip);
+            current_segment->chunks.try_emplace(reference_addr_chunk, reference_addr, reference_skip, 0);
             #else
-            current_segment->chunks.emplace_back(reference_addr_chunk, reference_addr, reference_skip, 0, intermediate_skip);
+            // current_segment->chunks.emplace_back(reference_addr_chunk, reference_addr, reference_skip, 0, intermediate_skip);
+            current_segment->chunks.emplace_back(reference_addr_chunk, reference_addr, reference_skip, 0);
             #endif
         }
         rows_available = rows;
@@ -186,7 +187,8 @@ public:
         if (it != current_segment->chunks.end()) {
             it->second.add_rows(addr, count);
         } else {
-            current_segment->chunks.try_emplace(chunk_id, addr, skip, count, 0);
+            // current_segment->chunks.try_emplace(chunk_id, addr, skip, count, 0);
+            current_segment->chunks.try_emplace(chunk_id, addr, skip, count);
         }
         #else
         uint32_t pos = chunk_table[chunk_id];
@@ -263,7 +265,7 @@ public:
         }
     }
 
-    void add_intermediate_addr(uint32_t from_addr, uint32_t to_addr) {
+    uint32_t add_intermediate_addr(uint32_t from_addr, uint32_t to_addr) {
         // adding internal reads of zero for consecutive addresses
         uint32_t count = to_addr - from_addr + 1;
         if (count > 1) {
@@ -272,32 +274,20 @@ public:
         } else {
             add_intermediate_rows(to_addr, 1);
         }
+        return count;
     }
 
-    void add_intermediates(uint32_t addr) {
-        if (last_addr != addr) {
-            if ((addr - last_addr) > 1) {
-                add_intermediate_addr(last_addr + 1, addr - 1);
-            }
-            last_addr = addr;
+    uint32_t add_intermediates(uint32_t addr) {
+        uint32_t count = 0;
+        if ((addr - last_addr) > 1) {
+            count = add_intermediate_addr(last_addr + 1, addr - 1);
         }
+        last_addr = addr;
+        return count;
     }
 
-    uint32_t add_intermediate_steps(uint32_t addr) {
-        // check if the distance between the last chunk and the current is too large,
-        // if so then we need to add intermediate rows
-        uint32_t intermediate_rows = 0;
-        if (reference_addr_chunk != NO_CHUNK_ID) {
-            uint32_t chunk_distance = current_chunk - reference_addr_chunk;
-            if (chunk_distance > CHUNK_MAX_DISTANCE) {
-                this->add_intermediate_rows(addr, 1);
-            }
-        }
-        return intermediate_rows;
-    }
     void stats() {
 
     }
 };
-#endif
 #endif

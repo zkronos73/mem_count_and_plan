@@ -69,7 +69,6 @@ public:
         current_segment = new MemSegment();
         from_page = MemCounter::addr_to_page(from_addr);
         to_page = MemCounter::addr_to_page(from_addr + (mb_size * 1024 * 1024) - 1);
-        printf("MemPlanner: pages(%d-%d)\n", from_page, to_page);
         if (MemCounter::page_to_addr(from_page) != from_addr) {
             std::ostringstream msg;
             msg << "MemPlanner::constructor: from_addr " << std::hex << from_addr << " not aligned to page " << std::dec << from_page;
@@ -96,7 +95,7 @@ public:
             addr = MemCounter::page_to_addr(page);
             uint32_t max_offset = MemCounter::addr_to_offset(max_addr);
             for (uint32_t offset = page * ADDR_PAGE_SIZE; offset <= max_offset; ++offset) {
-                for (uint32_t i = 0; i < MAX_THREADS; ++i, ++addr) {
+                for (uint32_t i = 0; i < MAX_THREADS; ++i, addr += 8) {
                     uint32_t pos = workers[i]->get_addr_table(offset);
                     if (pos == 0) continue;
                     uint32_t cpos = workers[i]->get_initial_pos(pos);
@@ -149,7 +148,7 @@ public:
                     offset = page * ADDR_PAGE_SIZE;
                 }
                 for (;offset <= max_offset; ++offset) {
-                    for (uint32_t i = 0; i < MAX_THREADS; ++i, ++addr) {
+                    for (uint32_t i = 0; i < MAX_THREADS; ++i, addr += 8) {
                         uint32_t pos = workers[i]->get_addr_table(offset);
                         if (pos == 0) continue;
                         uint32_t cpos = workers[i]->get_initial_pos(pos);
@@ -184,7 +183,7 @@ public:
             addr = MemCounter::page_to_addr(page);
             uint32_t max_offset = MemCounter::addr_to_offset(max_addr);
             for (uint32_t offset = page * ADDR_PAGE_SIZE; offset <= max_offset; ++offset) {
-                for (uint32_t i = 0; i < MAX_THREADS; ++i, ++addr) {
+                for (uint32_t i = 0; i < MAX_THREADS; ++i, addr += 8) {
                     uint32_t pos = workers[i]->get_addr_table(offset);
                     if (pos == 0) continue;
                     uint32_t cpos = workers[i]->get_initial_pos(pos);

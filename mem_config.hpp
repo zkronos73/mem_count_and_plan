@@ -2,6 +2,7 @@
 #define __MEM_CONFIG_HPP__
 
 #define MAX_LOCATORS 2048
+#define MAX_MEM_PLANNERS 16
 #define USE_ADDR_COUNT_TABLE
 // #define MEM_PLANNER_STATS
 
@@ -15,7 +16,6 @@
 
 
 #define THREAD_BITS 3
-// #define ADDR_LOW_BITS (THREAD_BITS + 5)
 #define ADDR_LOW_BITS (THREAD_BITS + 3)
 #define MAX_THREADS (1 << THREAD_BITS)
 #define ADDR_MASK ((MAX_THREADS - 1) * 8)
@@ -23,6 +23,7 @@
 #define MAX_PAGES 20
 #define ADDR_PAGE_BITS (23 - THREAD_BITS)
 #define ADDR_PAGE_SIZE (1 << ADDR_PAGE_BITS)
+#define RELATIVE_OFFSET_MASK (ADDR_PAGE_SIZE - 1)
 #define ADDR_TABLE_SIZE (ADDR_PAGE_SIZE * MAX_PAGES)
 #define OFFSET_BITS (25 + 4 - THREAD_BITS) // 4 bits (3 bits for 6 pages, 1 bit security)
 #define OFFSET_PAGE_SHIFT_BITS (OFFSET_BITS - 3)
@@ -36,7 +37,6 @@
 #define TIME_US_BY_CHUNK 350
 
 #define NO_CHUNK_ID 0xFFFFFFFF
-#define CHUNK_MAX_DISTANCE 16
 #define EMPTY_PAGE 0xFFFFFFFF
 
 #endif

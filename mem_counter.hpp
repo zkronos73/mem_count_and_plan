@@ -45,17 +45,18 @@ private:
     uint32_t *addr_table;
     #endif
     uint32_t *addr_slots;
-    uint32_t current_index;
     uint32_t current_chunk;
     uint32_t free_slot;
     uint64_t init;
     uint32_t ellapsed_ms;
     uint32_t tot_usleep;
     uint32_t queue_full;
+    const uint32_t addr_mask;
 public:
     uint32_t first_offset[MAX_PAGES];
     uint32_t last_offset[MAX_PAGES];
-    MemCounter(uint32_t id, const MemCountAndPlan *mcp, int count, uint64_t init) : id(id), mcp(mcp), mcp_count(count), init(init) {
+    MemCounter(uint32_t id, const MemCountAndPlan *mcp, int count, uint64_t init)
+    :id(id), mcp(mcp), mcp_count(count), init(init), addr_mask(id * 8) {
         count = 0;
         queue_full = 0;
         tot_usleep = 0;
@@ -98,110 +99,45 @@ public:
         const int chunks = mcp->chunks;
         const uint32_t mask_value = id * 8;
 
-        for (int j = 0; j < chunks; ++j) {
-            const uint32_t chunk_size = mcp->chunk_size[j];
-            const MemCountersBusData *chunk_data = mcp->chunk_data[j];
-            current_chunk = j;
-            for (uint32_t i = 0; i < chunk_size; i++) {
-                current_index = i;
-                if (i >= chunk_size) {
-                    return;
-                }
-                const uint8_t bytes = chunk_data[i].flags & 0xFF;
-                const uint32_t addr = chunk_data[i].addr;
-                if (bytes == 8 && (addr & 0x07) == 0) {
-                    // aligned access
-                    if ((addr & ADDR_MASK) != mask_value) {
-                        continue;
-                    }
-                    count_aligned(addr, j, 1);
-                } else {
-                    const uint32_t aligned_addr = addr & 0xFFFFFFF8;
-
-                    if ((aligned_addr & ADDR_MASK) == mask_value) {
-                        const int ops = 1 + (chunk_data[i].flags >> 16);
-                        count_aligned(aligned_addr, j, ops);
-                    }
-                    else if ((bytes + (addr & 0x07)) > 8 && ((aligned_addr + 8) & ADDR_MASK) == mask_value) {
-                        const int ops = 1 + (chunk_data[i].flags >> 16);
-                        count_aligned(aligned_addr + 8 , j, ops);
-                    }
-                }
-            }
-            uint64_t next_chunk = init + (uint64_t)(j+1) * TIME_US_BY_CHUNK;
+        for (uint32_t chunk_id = 0; chunk_id < chunks; ++chunk_id) {
+            uint64_t chunk_ready = init + (uint64_t)(chunk_id+1) * TIME_US_BY_CHUNK;
             uint64_t current = get_usec();
-            if (current < next_chunk) {
-                tot_usleep += (next_chunk - current);
-                if (current < (next_chunk - 10)) {
-                    usleep(next_chunk - current - 10);
+            if (current < chunk_ready) {
+                tot_usleep += (chunk_ready - current);
+                if (current < chunk_ready) {
+                    usleep(chunk_ready - current);
                 }
             }
+            execute_chunk(chunk_id, mcp->chunk_size[chunk_id], mcp->chunk_data[chunk_id]);
         }
         // compact();
         ellapsed_ms = ((get_usec() - init) / 1000);
     }
-    void compact(void) {
-        uint32_t *compact_addr_slots = (uint32_t *)std::aligned_alloc(64, free_slot * ADDR_SLOT_SIZE * sizeof(uint32_t));
-        uint32_t compact_pos = 0;
-        for (int page = 0; page < MAX_PAGES; ++page) {
-            int page_offset = page * ADDR_PAGE_SIZE;
-            uint32_t max_offset = last_offset[page];
-            if (max_offset == 0) {
-                continue;
-            }
-            uint32_t min_offset = first_offset[page];
-            for (uint32_t index = min_offset; index <= max_offset; ++index) {
-                uint32_t offset = page_offset + index;
-                #ifdef USE_ADDR_COUNT_TABLE
-                uint32_t pos = addr_count_table[offset].pos;
-                #else
-                uint32_t pos = addr_table[offset];
-                #endif
-                // printf("page: %d index: %d offset: %d => worker[%d] = pos: %d\n", page, index, offset, i, pos);
-                if (pos != 0) {
-                    uint32_t block = get_initial_block_pos(pos);
-                    uint32_t final_block = get_final_block_pos(pos);
-                    // uint32_t final_count = get_final_block_count(pos);
-                    while (true) {
-                        // TODO replace for addr
-                        compact_addr_slots[compact_pos] = offset;
-                        // TODO replace for next block, 0 if the last address block
-                        compact_addr_slots[compact_pos + 1] = 0;
-                        uint64_t *src = (uint64_t *)(&addr_slots[block + 2]);
-                        uint64_t *dst = (uint64_t *)(&compact_addr_slots[compact_pos + 2]);
-                        dst[0] = src[0];
-                        dst[1] = src[1];
-                        dst[2] = src[2];
-                        dst[3] = src[3];
-                        dst[4] = src[4];
-                        dst[5] = src[5];
-                        dst[6] = src[6];
+    void execute_chunk(uint32_t chunk_id, uint32_t chunk_size, const MemCountersBusData *chunk_data) {
+        current_chunk = chunk_id;
 
-                        // compact_addr_slots[compact_pos + 2] = addr_slots[block + 2];
-                        // compact_addr_slots[compact_pos + 3] = addr_slots[block + 3];
-                        // compact_addr_slots[compact_pos + 4] = addr_slots[block + 4];
-                        // compact_addr_slots[compact_pos + 5] = addr_slots[block + 5];
-                        // compact_addr_slots[compact_pos + 6] = addr_slots[block + 6];
-                        // compact_addr_slots[compact_pos + 7] = addr_slots[block + 7];
-                        // compact_addr_slots[compact_pos + 8] = addr_slots[block + 8];
-                        // compact_addr_slots[compact_pos + 9] = addr_slots[block + 9];
-                        // compact_addr_slots[compact_pos + 10] = addr_slots[block + 10];
-                        // compact_addr_slots[compact_pos + 11] = addr_slots[block + 11];
-                        // compact_addr_slots[compact_pos + 12] = addr_slots[block + 12];
-                        // compact_addr_slots[compact_pos + 13] = addr_slots[block + 13];
-                        // compact_addr_slots[compact_pos + 14] = addr_slots[block + 14];
-                        // compact_addr_slots[compact_pos + 15] = addr_slots[block + 15];
-                        // memcpy(&addr_slots[block + 2], &compact_addr_slots[compact_pos + 2], (ADDR_SLOT_SIZE - 2) * sizeof(uint32_t));
-                        compact_pos += ADDR_SLOT_SIZE;
-                        if (block == final_block) break;
-                        block = get_next_block(block);
-                    }
+        for (const MemCountersBusData *chunk_eod = chunk_data + chunk_size; chunk_eod != chunk_data; chunk_data++) {
+            const uint8_t bytes = chunk_data->flags & 0xFF;
+            const uint32_t addr = chunk_data->addr;
+            if (bytes == 8 && (addr & 0x07) == 0) {
+                // aligned access
+                if ((addr & ADDR_MASK) != addr_mask) {
+                    continue;
+                }
+                count_aligned(addr, chunk_id, 1);
+            } else {
+                const uint32_t aligned_addr = addr & 0xFFFFFFF8;
 
+                if ((aligned_addr & ADDR_MASK) == addr_mask) {
+                    const int ops = 1 + (chunk_data->flags >> 16);
+                    count_aligned(aligned_addr, chunk_id, ops);
+                }
+                else if ((bytes + (addr & 0x07)) > 8 && ((aligned_addr + 8) & ADDR_MASK) == addr_mask) {
+                    const int ops = 1 + (chunk_data->flags >> 16);
+                    count_aligned(aligned_addr + 8 , chunk_id, ops);
                 }
             }
         }
-        free(addr_slots);
-        addr_slots = compact_addr_slots;
     }
     inline uint32_t get_initial_block_pos(uint32_t pos) {
         uint32_t tpos = pos & ADDR_SLOT_MASK;
@@ -266,19 +202,15 @@ public:
         #endif
     }
     inline uint32_t get_next_slot_pos() {
-        // if (free_slot >= ADDR_SLOTS) {
-        //     printf("Error: no more free slots on thread %d\n", id_);
-        //     exit(1);
-        //     // return 0;
-        // }
+        if (free_slot >= ADDR_SLOTS) {
+            std::ostringstream msg;
+            msg << "ERROR: MemCounter no more free slots on thread" << id;
+            throw std::runtime_error(msg.str());
+        }
         return (free_slot++) * ADDR_SLOT_SIZE;
     }
     inline void count_aligned(uint32_t addr, uint32_t chunk_id, uint32_t count) {
-        uint32_t offset = addr_to_offset(addr, current_chunk, current_index);
-        // if (offset >= ADDR_TABLE_SIZE) {
-        //     printf("Error: offset %d out of bounds for addr 0x%X\n", offset, addr);
-        //     return;
-        // }
+        uint32_t offset = addr_to_offset(addr, current_chunk);
         #ifdef USE_ADDR_COUNT_TABLE
         uint32_t pos = addr_count_table[offset].pos;
         #else
@@ -290,7 +222,6 @@ public:
             addr_slots[pos + 1] = pos;
             addr_slots[pos + 2] = chunk_id;
             addr_slots[pos + 3] = count;
-            // addr_table[offset] = pos + 2;
             #ifdef USE_ADDR_COUNT_TABLE
             addr_count_table[offset].pos = pos + 2;
             addr_count_table[offset].count = count;
@@ -343,13 +274,13 @@ public:
     inline static void offset_info(uint32_t offset, uint32_t &page, uint32_t &addr, uint32_t thread_index) {
         page = offset >> ADDR_PAGE_BITS;
         uint32_t base_addr = page_to_addr(page);
-        addr = (offset << ADDR_LOW_BITS) + base_addr + thread_index;
+        addr = ((offset & RELATIVE_OFFSET_MASK) << ADDR_LOW_BITS) + base_addr + thread_index * 8;
     }
 
     inline static uint32_t offset_to_addr(uint32_t offset, uint32_t thread_index) {
         uint32_t page = offset >> ADDR_PAGE_BITS;
         uint32_t base_addr = page_to_addr(page);
-        return (offset << ADDR_LOW_BITS) + base_addr + thread_index;
+        return ((offset & RELATIVE_OFFSET_MASK) << ADDR_LOW_BITS) + base_addr + thread_index * 8;
     }
 
     inline static uint32_t addr_to_offset(uint32_t addr, uint32_t chunk_id = 0, uint32_t index = 0) {
@@ -376,7 +307,7 @@ public:
             case 0xDC: return ((addr - 0xDC000000) >> (ADDR_LOW_BITS)) + 19 * ADDR_PAGE_SIZE;
         }
         std::ostringstream msg;
-        msg << "ERROR: addr_to_offset: 0x" << std::hex << addr << " (" << std::dec << chunk_id << ":" << index << ")";
+        msg << "ERROR: addr_to_offset: 0x" << std::hex << addr << " (" << std::dec << chunk_id << ")";
         throw std::runtime_error(msg.str());
     }
 
@@ -432,7 +363,7 @@ public:
             case 0xFF: return 0xFFFFFFFF;
         }
         std::ostringstream msg;
-        msg << "ERROR: page_to_address page:" << page;
+        msg << "ERROR: MemCounter page_to_address page:" << page;
         throw std::runtime_error(msg.str());
     }
 };

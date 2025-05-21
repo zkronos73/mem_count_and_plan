@@ -19,11 +19,11 @@ public:
     }
     MemSegment(uint32_t chunk_id, uint32_t from_addr, uint32_t skip, uint32_t count) : is_last_segment(false) {
         chunks.reserve(1024);
-        chunks.try_emplace(chunk_id, std::move(MemCheckPoint(from_addr, skip, count, 0)));
+        chunks.try_emplace(chunk_id, std::move(MemCheckPoint(from_addr, skip, count)));
     }
     #ifdef MEM_CHECK_POINT_MAP
     void add_or_update(uint32_t chunk_id, uint32_t from_addr, uint32_t count) {
-        auto result = chunks.try_emplace(chunk_id, std::move(MemCheckPoint(from_addr, 0, count, 0)));
+        auto result = chunks.try_emplace(chunk_id, std::move(MemCheckPoint(from_addr, 0, count)));
         if (!result.second) {
             result.first->second.add_rows(from_addr, count);
         }
