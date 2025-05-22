@@ -70,10 +70,12 @@ private:
     SegmentStats segment_stats[MAX_SEGMENTS];
     #endif
     uint64_t elapsed;
+    MemSegmentHashTable *hash_table;
 
 public:
     MemPlanner(uint32_t id, uint32_t rows, uint32_t from_addr, uint32_t mb_size)
     :id(id),rows(rows) {
+        hash_table = new MemSegmentHashTable(MAX_CHUNKS);   // 2^18 * 2^18 = 2^36   // 2^14 * 2^18 = 2^32
         rows_available = rows;
         reference_addr_chunk = NO_CHUNK_ID;
         reference_addr = 0;
@@ -134,7 +136,16 @@ public:
                 break;
             }
             execute_from_locator(workers, locator);
-            segments.push_back(current_segment);
+            // current_segment->close();
+
+
+
+            segments.emplace_back(current_segment);
+
+
+
+
+
             current_segment = nullptr;
         }
         elapsed = get_usec() - init;
@@ -269,20 +280,31 @@ public:
         if (current_segment == nullptr) {
             // include first chunk
             uint32_t consumed = std::min(count, rows);
+            #ifdef MEM_CHECK_POINT_MAP
             current_segment = new MemSegment(chunk_id, addr, skip, consumed);
+            #else
+            current_segment = new MemSegment(hash_table, chunk_id, addr, skip, consumed);
+            #endif
             rows_available = rows - consumed;
             return (rows_available != 0);
         }
         if (rows_available <= count) {
-            current_segment->add_or_update(chunk_id, addr, rows_available);
+            current_segment_add(chunk_id, addr, rows_available);
             rows_available = 0;
             return false;
         }
-        current_segment->add_or_update(chunk_id, addr, count);
+        current_segment_add(chunk_id, addr, count);
         rows_available -= count;
         return true;
     }
 
+    void current_segment_add(uint32_t chunk_id, uint32_t addr, uint32_t count) {
+        #ifdef MEM_CHECK_POINT_MAP
+        current_segment->add_or_update(chunk_id, addr, count);
+        #else
+        current_segment->add_or_update(hash_table, chunk_id, addr, count);
+        #endif
+    }
     void stats() {
         printf("PLANNER|I: %2d|D: %4d|%7.2f ms\n", id, locators_done, elapsed / 1000.0);
         #ifdef MEM_PLANNER_STATS

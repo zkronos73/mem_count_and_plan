@@ -14,7 +14,6 @@
 #define MEM_ALIGN_ROWS (1 << 21)
 #define MAX_CHUNKS 8192     // 2^13 * 2^18 = 2^31
 
-
 #define THREAD_BITS 3
 #define ADDR_LOW_BITS (THREAD_BITS + 3)
 #define MAX_THREADS (1 << THREAD_BITS)

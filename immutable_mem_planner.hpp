@@ -51,10 +51,16 @@ private:
     uint32_t locators_count;
     #endif
     MemSegment *current_segment;
+    #ifndef MEM_CHECK_POINT_MAP
+    MemSegmentHashTable *hash_table;
+    #endif
     std::vector<MemSegment *> segments;
 
 public:
     ImmutableMemPlanner(uint32_t rows, uint32_t from_addr, uint32_t mb_size):rows(rows) {
+        #ifndef MEM_CHECK_POINT_MAP
+        hash_table = new MemSegmentHashTable(MAX_CHUNKS);   // 2^18 * 2^18 = 2^36   // 2^14 * 2^18 = 2^32
+        #endif
         rows_available = rows;
         reference_addr_chunk = NO_CHUNK_ID;
         reference_addr = 0;
@@ -63,7 +69,11 @@ public:
         #ifdef DIRECT_MEM_LOCATOR
         locators_count = 0;
         #endif
+        #ifdef MEM_CHECK_POINT_MAP
         current_segment = new MemSegment();
+        #else
+        current_segment = new MemSegment(hash_table);
+        #endif
         from_page = MemCounter::addr_to_page(from_addr);
         to_page = MemCounter::addr_to_page(from_addr + (mb_size * 1024 * 1024) - 1);
         if (MemCounter::page_to_addr(from_page) != from_addr) {
@@ -140,15 +150,15 @@ public:
     void close_last_segment() {
         if (rows_available < rows) {
             close_segment(true);
-        } else if (segments.size() > 0) {
+        }/* else if (segments.size() > 0) {
             segments.back()->is_last_segment = true;
-        }
+        }*/
     }
     void close_segment(bool last = false) {
-        current_segment->is_last_segment = last;
+        // current_segment->is_last_segment = last;
         // printf("MemPlanner::close_segment: %d chunks from_page:%d\n", current_segment->chunks.size(), from_page);
         #ifdef SEGMENT_STATS
-        uint32_t segment_chunks = current_segment->chunks.size();
+        uint32_t segment_chunks = current_segment->size();
         if (segment_chunks > max_chunks) {
             max_chunks = segment_chunks;
         }
@@ -158,8 +168,12 @@ public:
         tot_chunks += segment_chunks;
         #endif
 
-        segments.push_back(current_segment);
+        segments.emplace_back(current_segment);
+        #ifdef MEM_CHECK_POINT_MAP
         current_segment = new MemSegment();
+        #else
+        current_segment = new MemSegment(hash_table);
+        #endif
     }
     void open_segment(uint32_t intermediate_skip) {
         #ifndef MEM_CHECK_POINT_MAP
@@ -168,11 +182,9 @@ public:
         close_segment(false);
         if (reference_addr_chunk != NO_CHUNK_ID) {
             #ifdef MEM_CHECK_POINT_MAP
-            // current_segment->chunks.try_emplace(reference_addr_chunk, reference_addr, reference_skip, 0, intermediate_skip);
-            current_segment->chunks.try_emplace(reference_addr_chunk, reference_addr, reference_skip, 0);
+            current_segment->add_or_update(reference_addr_chunk, reference_addr, 0, reference_skip);
             #else
-            // current_segment->chunks.emplace_back(reference_addr_chunk, reference_addr, reference_skip, 0, intermediate_skip);
-            current_segment->chunks.emplace_back(reference_addr_chunk, reference_addr, reference_skip, 0);
+            current_segment->add_or_update(hash_table, reference_addr_chunk, reference_addr, 0, reference_skip);
             #endif
         }
         rows_available = rows;
@@ -182,27 +194,11 @@ public:
         add_chunk_to_segment(current_chunk, addr, 1, 0);
     }
     void add_chunk_to_segment(uint32_t chunk_id, uint32_t addr, uint32_t count, uint32_t skip) {
-        #ifdef MEM_CHECK_POINT_MAP
-        auto it = current_segment->chunks.find(chunk_id);
-        if (it != current_segment->chunks.end()) {
-            it->second.add_rows(addr, count);
-        } else {
-            // current_segment->chunks.try_emplace(chunk_id, addr, skip, count, 0);
-            current_segment->chunks.try_emplace(chunk_id, addr, skip, count);
-        }
-        #else
-        uint32_t pos = chunk_table[chunk_id];
-        if (pos < limit_pos) {
-            // not found
-            // printf("MemPlanner::add_chunk_to_segment: chunk_id %d not found (pos: 0x%08X) size:%d limit_pos: 0x%08X\n", chunk_id, pos, current_segment->chunks.size(), limit_pos);
-            chunk_table[chunk_id] = limit_pos + current_segment->chunks.size();
-            current_segment->chunks.emplace_back(chunk_id, addr, skip, count, 0);
-        } else {
-            uint32_t vpos = pos & 0xFFFF;
-            // printf("MemPlanner::add_chunk_to_segment: chunk_id %d already exists at vpos %d (pos: 0x%08X) size:%d limit_pos: 0x%08X\n", chunk_id, vpos, pos, current_segment->chunks.size(), limit_pos);
-            current_segment->chunks[vpos].add_rows(addr, count);
-        }
-        #endif
+            #ifdef MEM_CHECK_POINT_MAP
+        current_segment->add_or_update(chunk_id, addr, count, skip);
+            #else
+        current_segment->add_or_update(hash_table, chunk_id, addr, count, skip);
+            #endif
     }
     void preopen_segment(uint32_t addr, uint32_t intermediate_rows) {
         if (rows_available == 0) {

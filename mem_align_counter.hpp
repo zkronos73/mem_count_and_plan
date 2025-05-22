@@ -18,7 +18,7 @@ public:
 
 class MemAlignCounter {
 private:
-    const MemCountAndPlan *mcp;
+    const MemCountTrace *mcp;
     MemAlignCheckPoint *current_cp;
     std::vector<MemAlignCheckPoint *> checkpoints;
     uint32_t count;
@@ -31,7 +31,7 @@ private:
     uint32_t ellapsed_ms;
 public:
     uint32_t last_addr[MAX_PAGES];
-    MemAlignCounter(uint32_t rows, const MemCountAndPlan *mcp, uint64_t init) :mcp(mcp), rows(rows), init(init) {
+    MemAlignCounter(uint32_t rows, const MemCountTrace *mcp, uint64_t init) :mcp(mcp), rows(rows), init(init) {
         count = 0;
         available_rows = rows;
         skip = 0;

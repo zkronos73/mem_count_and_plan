@@ -10,7 +10,7 @@ struct MemCountersBusData {
     uint32_t flags;
 };
 
-struct MemCountAndPlan {
+struct MemCountTrace {
     // BusDataChunk *chunk_data[MAX_CHUNKS];
     MemCountersBusData *chunk_data[MAX_CHUNKS];
     uint32_t chunk_size[MAX_CHUNKS];

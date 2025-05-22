@@ -9,7 +9,7 @@
 #include <iostream>
 #include <string.h>
 #include <sys/time.h>
-#include <cstdint>  // Per a uint32_t
+#include <cstdint>
 #include <vector>
 #include <map>
 #include <unordered_map>
@@ -74,14 +74,14 @@ struct MemAlignCount {
 
 typedef struct {
     int thread_index;
-    const MemCountAndPlan *mcp;
+    const MemCountTrace *mcp;
     int count;
 } MemCountAndPlanThread;
 
 int main() {
     printf("Starting...\n");
 
-    MemCountAndPlan mcp;
+    MemCountTrace mcp;
     int chunks = 0;
     int tot_chunks = 0;
     uint32_t tot_ops = 0;
@@ -156,8 +156,8 @@ int main() {
 
     start = std::chrono::high_resolution_clock::now();
     planner_threads.emplace_back([mem_planner, workers, &locators](){ mem_planner->generate_locators(workers, locators);});
-    planner_threads.emplace_back([rom_data_planner, workers, &locators](){ rom_data_planner->execute(workers);});
-    planner_threads.emplace_back([input_data_planner, workers, &locators](){ input_data_planner->execute(workers);});
+    // planner_threads.emplace_back([rom_data_planner, workers, &locators](){ rom_data_planner->execute(workers);});
+    // planner_threads.emplace_back([input_data_planner, workers, &locators](){ input_data_planner->execute(workers);});
     for (size_t i = 0; i < mem_planners.size(); ++i) {
         planner_threads.emplace_back([&mem_planners, i, workers, &locators]{ mem_planners[i].execute_from_locators(workers, locators);});
     }

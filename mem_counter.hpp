@@ -33,7 +33,7 @@ struct AddrCount {
 class MemCounter {
 private:
     const uint32_t id;
-    const MemCountAndPlan *mcp;
+    const MemCountTrace *mcp;
 
     const int mcp_count;
     int count;
@@ -55,7 +55,7 @@ private:
 public:
     uint32_t first_offset[MAX_PAGES];
     uint32_t last_offset[MAX_PAGES];
-    MemCounter(uint32_t id, const MemCountAndPlan *mcp, int count, uint64_t init)
+    MemCounter(uint32_t id, const MemCountTrace *mcp, int count, uint64_t init)
     :id(id), mcp(mcp), mcp_count(count), init(init), addr_mask(id * 8) {
         count = 0;
         queue_full = 0;
