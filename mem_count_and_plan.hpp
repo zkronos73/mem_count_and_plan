@@ -27,9 +27,9 @@
 #include "mem_align_counter.hpp"
 #include "mem_planner.hpp"
 #include "mem_locator.hpp"
+#include "mem_context.hpp"
 #include "immutable_mem_planner.hpp"
 
-#ifdef false
 typedef struct {
     int thread_index;
     const MemCountTrace *mcp;
@@ -39,128 +39,169 @@ typedef struct {
 
 class MemCountAndPlan {
 private:
-    MemLocators locators;
-    MemCountTrace mcp;
-    MemCountersBusData *chunk_data;
-    uint32_t *chunk_size;
-    uint32_t chunks;
     uint32_t max_chunks;
-    std::vector<std::thread> planner_threads;
-    std::vector<MemCounter *> workers;
-    MemLocators locators;
+    std::vector<std::thread> plan_threads;
+    std::vector<MemCounter *> count_workers;
+    MemAlignCounter *mem_align_counter;
+    MemContext *context;
+    MemPlanner *quick_mem_planner;
+    ImmutableMemPlanner *rom_data_planner;
+    ImmutableMemPlanner *input_data_planner;
+    std::vector<MemPlanner> plan_workers;
+    std::thread *parallel_execute;
+    uint64_t t_init_us;
+    uint64_t t_count_us;
+    uint64_t t_prepare_us;
+    uint64_t t_plan_us;
 public:
-
     MemCountAndPlan() {
-        chunk_data = nullptr;
-        chunk_size = nullptr;
+        context = new MemContext();
     }
     ~MemCountAndPlan() {
     }
-    void setup(uint32_t max_chunks = MAX_CHUNKS) {
-        chunks = 0;
-        chunk_data = (MemCountersBusData *)malloc(sizeof(MemCountersBusData) * max_chunks);
-        chunk_size = (uint32_t *)malloc(sizeof(MemCountersBusData) * max_chunks);
-        this->max_chunks = max_chunks;
+    void clear() {
+        // for (auto& chunk : chunks) {
+        //     free(chunk.chunk_data);
+        // }
+        context->clear();
     }
-    void load() {
-        chunks = 0;
-        uint32_t tot_chunks = 0;
-        uint32_t tot_ops = 0;
-        printf("Loading compact data...\n");
-        int32_t items_read;
-        while (chunks < MAX_CHUNKS && (items_read = load_from_compact_file(chunks, &(mcp.chunk_data[chunks]))) >=0) {
-            mcp.chunk_size[chunks] = items_read;
-            tot_ops += count_operations(mcp.chunk_data[chunks], mcp.chunk_size[chunks]);
-            chunks++;
-            tot_chunks += mcp.chunk_size[chunks - 1];
-            if (chunks % 100 == 0) printf("Loaded chunk %d with size %d\n", chunks, mcp.chunk_size[chunks - 1]);
+    void prepare() {
+        uint init = get_usec();
+        printf("Preparing MemCountAndPlan (clear count_workers)...\n");
+        count_workers.clear();
+        printf("Preparing MemCountAndPlan (count_workers)...\n");
+        for (size_t i = 0; i < MAX_THREADS; ++i) {
+            printf("Preparing MemCountAndPlan (count_worker %ld)...\n", i);
+            count_workers.push_back(new MemCounter(i, context));
         }
-        printf("chunks: %d  tot_chunks: %d tot_ops: %d tot_time:%d (ms)\n", chunks, tot_chunks, tot_ops, (chunks * TIME_US_BY_CHUNK)/1000);
-        mcp.chunks = chunks;
+        printf("Preparing MemCountAndPlan (mem_align_counter)...\n");
+        mem_align_counter = new MemAlignCounter(MEM_ALIGN_ROWS, context);
+        plan_workers.clear();
+        printf("Preparing MemCountAndPlan (rom_data_planner)...\n");
+        rom_data_planner = new ImmutableMemPlanner(MEM_ROWS, 0x80000000, 128);
+        printf("Preparing MemCountAndPlan (input_data_planner)...\n");
+        input_data_planner = new ImmutableMemPlanner(MEM_ROWS, 0x90000000, 128);
+        printf("Preparing MemCountAndPlan (quick_mem_planner)...\n");
+        quick_mem_planner = new MemPlanner(0, MEM_ROWS, 0xA0000000, 512);
+        printf("Preparing MemCountAndPlan (planners)...\n");
+        for (int i = 0; i < MAX_MEM_PLANNERS; ++i) {
+            plan_workers.emplace_back(i+1, MEM_ROWS, 0xA0000000, 512);
+        }
+        printf("Prepared MemCountAndPlan\n");
+        t_prepare_us = get_usec() - init;
+    }
+    void add_chunk(MemCountersBusData *chunk_data, uint32_t chunk_size) {
+        context->add_chunk(chunk_data, chunk_size);
+    }
+    void detach_execute() {
+        // printf("MemCountAndPlan::count_phase\n");
+        count_phase();
+        // printf("MemCountAndPlan::plan_phase\n");
+        plan_phase();
     }
     void execute(void) {
-        count_phase();
-        plan_phase();
-        stats();
+        parallel_execute = new std::thread([this](){ this->detach_execute();});
+        // parallel_execute.detach();
     }
     void count_phase() {
-        auto start = std::chrono::high_resolution_clock::now();
+        uint64_t init = t_init_us = get_usec();
         std::vector<std::thread> threads;
 
-        uint64_t init = get_usec();
-        for (size_t i = 0; i < MAX_THREADS; ++i) {
-            MemCounter *th = new MemCounter(i, &mcp, mcp.chunk_size[i], init);
-            workers.push_back(th);
-        }
-        auto mem_align_counter = new MemAlignCounter(MEM_ALIGN_ROWS, &mcp, init);
-        auto end = std::chrono::high_resolution_clock::now();
-        auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end-start);
-
-        std::cout << "Duration initialization " << duration.count() << " ms" << std::endl;
-
-        start = std::chrono::high_resolution_clock::now();
         for (int i = 0; i < MAX_THREADS; ++i) {
-            threads.emplace_back([this, i](){ workers[i]->execute();});
+            threads.emplace_back([this, i](){count_workers[i]->execute();});
         }
-        threads.emplace_back([mem_align_counter](){ mem_align_counter->execute();});
+        threads.emplace_back([this](){ mem_align_counter->execute();});
 
         for (auto& t : threads) {
             t.join();
         }
-
-        end = std::chrono::high_resolution_clock::now();
-        duration = std::chrono::duration_cast<std::chrono::milliseconds>(end-start);
-        std::cout << "Mem count " << duration.count() << " ms" << std::endl;
-
-        std::cout << "MemAlign " << mem_align_counter->get_instances_count() << " instances, on " << mem_align_counter->get_ellapsed_ms() << " ms" << std::endl;
+        t_count_us = (uint32_t) (get_usec() - init);
     }
 
     void plan_phase() {
+        uint64_t init = get_usec();
+        std::vector<std::thread> threads;
 
-        // std::vector<MemPlanner *> planners;
-
-        // auto rom_data_planner = new MemPlanner(MEM_ROWS, 0x80000000, 128, false);
-        // auto input_data_planner = new MemPlanner(MEM_ROWS, 0x90000000, 128, false);
-        std::vector<MemPlanner> mem_planners;
-        auto mem_planner = new MemPlanner(0, MEM_ROWS, 0xA0000000, 512);
+        plan_threads.emplace_back([this](){ quick_mem_planner->generate_locators(count_workers, context->locators);});
+        plan_threads.emplace_back([this](){ rom_data_planner->execute(count_workers);});
+        plan_threads.emplace_back([this](){ input_data_planner->execute(count_workers);});
         for (int i = 0; i < MAX_MEM_PLANNERS; ++i) {
-            mem_planners.emplace_back(i+1, MEM_ROWS, 0xA0000000, 512);
+            threads.emplace_back([this, i](){ plan_workers[i].execute_from_locators(count_workers, context->locators);});
         }
-
-
-        auto start = std::chrono::high_resolution_clock::now();
-        planner_threads.emplace_back([mem_planner, this, &locators](){ mem_planner->generate_locators(workers, locators);});
-        // planner_threads.emplace_back([rom_data_planner, workers, &locators](){ rom_data_planner->execute(workers);});
-        // planner_threads.emplace_back([input_data_planner, workers, &locators](){ input_data_planner->execute(workers);});
-        for (size_t i = 0; i < mem_planners.size(); ++i) {
-            planner_threads.emplace_back([&mem_planners, i, this, &locators]{ mem_planners[i].execute_from_locators(workers, locators);});
-        }
-
-        for (auto& t : planner_threads) {
+        for (auto& t : threads) {
             t.join();
         }
-        auto end = std::chrono::high_resolution_clock::now();
-        auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end-start);
-        std::cout << "Mem plan " << duration.count() << " ms" << std::endl;
-        mem_planner->stats();
-
-        for (uint32_t i = 0; i < mem_planners.size(); ++i) {
-            mem_planners[i].stats();
-        }
+        t_plan_us = (uint32_t) (get_usec() - init);
     }
     void stats() {
         uint32_t tot_used_slots = 0;
         for (size_t i = 0; i < MAX_THREADS; ++i) {
-            uint32_t used_slots = workers[i]->get_used_slots();
+            uint32_t used_slots = count_workers[i]->get_used_slots();
             tot_used_slots += used_slots;
-            printf("Thread %ld: used slots %d/%d (%04.02f%%) T:%d ms S:%d ms Q:%d\n", i, used_slots, ADDR_SLOTS, ((double)used_slots*100.0)/(double)(ADDR_SLOTS), workers[i]->get_ellapsed_ms(), workers[i]->get_tot_usleep()/1000, workers[i]->get_queue_full_times()/1000);
+            printf("Thread %ld: used slots %d/%d (%04.02f%%) T:%d ms S:%d ms Q:%d\n",
+                i, used_slots, ADDR_SLOTS,
+                ((double)used_slots*100.0)/(double)(ADDR_SLOTS), count_workers[i]->get_elapsed_ms(),
+                count_workers[i]->get_tot_usleep()/1000,
+                count_workers[i]->get_queue_full_times()/1000);
         }
         printf("\n> threads: %d\n", MAX_THREADS);
         printf("> address table: %ld MB\n", (ADDR_TABLE_SIZE * ADDR_TABLE_ELEMENT_SIZE * MAX_THREADS)>>20);
         printf("> memory slots: %ld MB (used: %ld MB)\n", (ADDR_SLOTS_SIZE * sizeof(uint32_t) * MAX_THREADS)>>20, (tot_used_slots * ADDR_SLOT_SIZE * sizeof(uint32_t))>> 20);
         printf("> page table: %ld MB\n\n", (ADDR_PAGE_SIZE * sizeof(uint32_t))>> 20);
+        quick_mem_planner->stats();
+        for (uint32_t i = 0; i < plan_workers.size(); ++i) {
+            plan_workers[i].stats();
+        }
+        printf("execution: %04.2f ms\n", (TIME_US_BY_CHUNK * context->size()) / 1000.0);
+        printf("count_phase: %04.2f ms\n", t_count_us / 1000.0);
+        printf("plan_phase: %04.2f ms\n", t_plan_us / 1000.0);
+    }
+    void set_completed() {
+        context->set_completed();
+    }
+    void wait() {
+        parallel_execute->join();
+        delete parallel_execute;
+        parallel_execute = nullptr;
     }
 
 };
-#endif
+
+MemCountAndPlan *create_mem_count_and_plan(void) {
+    MemCountAndPlan *mcp = new MemCountAndPlan();
+    printf("MemCountAndPlan created. Preparing ....\n");
+    mcp->prepare();
+    printf("MemCountAndPlan prepared\n");
+    return mcp;
+}
+
+void destroy_mem_count_and_plan(MemCountAndPlan *mcp) {
+    if (mcp) {
+        mcp->clear();
+        delete mcp;
+    }
+}
+
+void execute_mem_count_and_plan(MemCountAndPlan *mcp) {
+    mcp->execute();
+}
+
+void add_chunk_mem_count_and_plan(MemCountAndPlan *mcp, MemCountersBusData *chunk_data, uint32_t chunk_size) {
+    mcp->add_chunk(chunk_data, chunk_size);
+}
+
+void stats_mem_count_and_plan(MemCountAndPlan *mcp) {
+    mcp->stats();
+}
+
+
+void set_completed_mem_count_and_plan(MemCountAndPlan *mcp) {
+    mcp->set_completed();
+}
+
+void wait_mem_count_and_plan(MemCountAndPlan *mcp) {
+    mcp->wait();
+}
+
+
 #endif

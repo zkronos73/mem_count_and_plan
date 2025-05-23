@@ -19,6 +19,7 @@
 
 #include "mem_config.hpp"
 #include "mem_types.hpp"
+#include "mem_context.hpp"
 #include "tools.hpp"
 
 #ifdef USE_ADDR_COUNT_TABLE
@@ -33,9 +34,7 @@ struct AddrCount {
 class MemCounter {
 private:
     const uint32_t id;
-    const MemCountTrace *mcp;
-
-    const int mcp_count;
+    MemContext *context;
     int count;
     int addr_count;
 
@@ -47,16 +46,15 @@ private:
     uint32_t *addr_slots;
     uint32_t current_chunk;
     uint32_t free_slot;
-    uint64_t init;
-    uint32_t ellapsed_ms;
+    uint32_t elapsed_ms;
     uint32_t tot_usleep;
     uint32_t queue_full;
     const uint32_t addr_mask;
 public:
     uint32_t first_offset[MAX_PAGES];
     uint32_t last_offset[MAX_PAGES];
-    MemCounter(uint32_t id, const MemCountTrace *mcp, int count, uint64_t init)
-    :id(id), mcp(mcp), mcp_count(count), init(init), addr_mask(id * 8) {
+    MemCounter(uint32_t id, MemContext *context)
+    :id(id), context(context), addr_mask(id * 8) {
         count = 0;
         queue_full = 0;
         tot_usleep = 0;
@@ -71,6 +69,7 @@ public:
 
         // no memset because informations is overrided.
         addr_slots = (uint32_t *)std::aligned_alloc(64, ADDR_SLOTS_SIZE * sizeof(uint32_t));
+        printf("CONSTRUCTOR Thread_%d addr_count:%d addr_count_table:%p addr_slots:%p\n", id, addr_count, addr_count_table, addr_slots);
 
         memset(first_offset, 0xFF, sizeof(first_offset));
         memset(last_offset, 0, sizeof(first_offset));
@@ -89,6 +88,7 @@ public:
     }
     ~MemCounter() {
         #ifdef USE_ADDR_COUNT_TABLE
+        printf("DESTRUCTOR Thread_%d addr_count:%d addr_count_table:%p addr_slots:%p\n", id, addr_count, addr_count_table, addr_slots);
         free(addr_count_table);
         #else
         free(addr_table);
@@ -96,24 +96,16 @@ public:
         free(addr_slots);
     }
     void execute() {
-        const int chunks = mcp->chunks;
-        const uint32_t mask_value = id * 8;
-
-        for (uint32_t chunk_id = 0; chunk_id < chunks; ++chunk_id) {
-            uint64_t chunk_ready = init + (uint64_t)(chunk_id+1) * TIME_US_BY_CHUNK;
-            uint64_t current = get_usec();
-            if (current < chunk_ready) {
-                tot_usleep += (chunk_ready - current);
-                if (current < chunk_ready) {
-                    usleep(chunk_ready - current);
-                }
-            }
-            execute_chunk(chunk_id, mcp->chunk_size[chunk_id], mcp->chunk_data[chunk_id]);
+        uint64_t init = get_usec();
+        const MemChunk *chunk;
+        uint32_t chunk_id = 0;
+        while ((chunk = context->get_chunk(chunk_id)) != nullptr) {
+            execute_chunk(chunk_id, chunk->data, chunk->count);
+            ++chunk_id;
         }
-        // compact();
-        ellapsed_ms = ((get_usec() - init) / 1000);
+        elapsed_ms = ((get_usec() - init) / 1000);
     }
-    void execute_chunk(uint32_t chunk_id, uint32_t chunk_size, const MemCountersBusData *chunk_data) {
+    void execute_chunk(uint32_t chunk_id, const MemCountersBusData *chunk_data, uint32_t chunk_size) {
         current_chunk = chunk_id;
 
         for (const MemCountersBusData *chunk_eod = chunk_data + chunk_size; chunk_eod != chunk_data; chunk_data++) {
@@ -155,7 +147,7 @@ public:
         return addr_slots[pos+1];
     }
 
-    inline uint32_t get_initial_pos(uint32_t pos) {
+    inline uint32_t get_initial_pos(uint32_t pos) const {
         uint32_t tpos = pos & ADDR_SLOT_MASK;
         if (tpos >= ADDR_SLOTS_SIZE) {
             std::ostringstream msg;
@@ -169,13 +161,13 @@ public:
         }
     }
 
-    inline uint32_t get_pos_value(uint32_t pos) {
+    inline uint32_t get_pos_value(uint32_t pos) const {
         return addr_slots[pos];
     }
-    inline uint32_t get_queue_full_times() {
+    inline uint32_t get_queue_full_times() const {
         return queue_full;
     }
-    inline uint32_t get_next_pos(uint32_t pos) {
+    inline uint32_t get_next_pos(uint32_t pos) const {
         int relative_pos = pos & (ADDR_SLOT_SIZE - 1);
         if (relative_pos < (ADDR_SLOT_SIZE - 1)) {
             return pos + 1;
@@ -186,14 +178,14 @@ public:
         }
         return 0;
     }
-    inline uint32_t get_addr_table(uint32_t index) {
+    inline uint32_t get_addr_table(uint32_t index) const {
         #ifdef USE_ADDR_COUNT_TABLE
         return addr_count_table[index].pos;
         #else
         return addr_table[index];
         #endif
     }
-    inline uint32_t get_count_table(uint32_t index) {
+    inline uint32_t get_count_table(uint32_t index) const {
         // return count_table[index];
         #ifdef USE_ADDR_COUNT_TABLE
         return addr_count_table[index].count;
@@ -264,8 +256,8 @@ public:
             #endif
         }
     }
-    uint32_t get_ellapsed_ms() {
-        return ellapsed_ms;
+    uint32_t get_elapsed_ms() {
+        return elapsed_ms;
     }
     inline static uint32_t offset_to_page(uint32_t offset) {
         return (offset >> ADDR_PAGE_BITS);

@@ -137,15 +137,7 @@ public:
             }
             execute_from_locator(workers, locator);
             // current_segment->close();
-
-
-
             segments.emplace_back(current_segment);
-
-
-
-
-
             current_segment = nullptr;
         }
         elapsed = get_usec() - init;
@@ -209,7 +201,7 @@ public:
         segment_stats[index].offset_count = offset_count;
         segment_stats[index].first_addr = first_segment_addr;
         segment_stats[index].last_addr = last_segment_addr;
-        segment_stats[index].chunks = current_segment->chunks.size();
+        segment_stats[index].chunks = current_segment->size();
     }
     #endif
     void generate_locators(const std::vector<MemCounter *> &workers, MemLocators &locators) {
@@ -219,6 +211,7 @@ public:
         uint32_t offset, max_offset;
         bool inserted_first_locator = false;
         for (uint32_t page = from_page; page < to_page; ++page) {
+            printf("page:0x%08X\n", page);
             get_offset_limits(workers, page, offset, max_offset);
             for (;offset <= max_offset; ++offset) {
                 for (uint32_t thread_index = 0; thread_index < MAX_THREADS; ++thread_index) {
@@ -318,7 +311,7 @@ public:
                 segment_stats[index].last_addr,
                 id,
                 index,
-                segments[index]->chunks.size(),
+                segments[index]->size(),
                 segment_stats[index].addr_count,
                 segment_stats[index].offset_count);
         }

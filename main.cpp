@@ -25,6 +25,8 @@
 #include "mem_planner.hpp"
 #include "mem_locator.hpp"
 #include "immutable_mem_planner.hpp"
+#include "mem_count_and_plan.hpp"
+#include "mem_test.hpp"
 
 // TODO: additional thread to sort memories address vs pages
 // TODO: shared memory slots to balance in a worst scenario
@@ -66,6 +68,23 @@ public:
     }
 };
 
+int main() {
+    // printf("Starting...\n");
+    // auto cp = create_mem_count_and_plan();
+    // printf("Executing...\n");
+    // execute(cp);
+    // while (true) {
+    //     printf("Waiting...\n");
+    //     sleep(5);
+    // }
+    MemTest mem_test;
+    mem_test.load();
+    mem_test.execute();
+    printf("END\n");
+}
+
+#ifdef false
+
 struct MemAlignCount {
     uint32_t chunk_id;
     uint32_t count[3];
@@ -78,7 +97,8 @@ typedef struct {
     int count;
 } MemCountAndPlanThread;
 
-int main() {
+
+int main2() {
     printf("Starting...\n");
 
     MemCountTrace mcp;
@@ -127,13 +147,13 @@ int main() {
     duration = std::chrono::duration_cast<std::chrono::milliseconds>(end-start);
     std::cout << "Mem count " << duration.count() << " ms" << std::endl;
 
-    std::cout << "MemAlign " << mem_align_counter->get_instances_count() << " instances, on " << mem_align_counter->get_ellapsed_ms() << " ms" << std::endl;
+    std::cout << "MemAlign " << mem_align_counter->get_instances_count() << " instances, on " << mem_align_counter->get_elapsed_ms() << " ms" << std::endl;
 
     uint32_t tot_used_slots = 0;
     for (size_t i = 0; i < MAX_THREADS; ++i) {
         uint32_t used_slots = workers[i]->get_used_slots();
         tot_used_slots += used_slots;
-        printf("Thread %ld: used slots %d/%d (%04.02f%%) T:%d ms S:%d ms Q:%d\n", i, used_slots, ADDR_SLOTS, ((double)used_slots*100.0)/(double)(ADDR_SLOTS), workers[i]->get_ellapsed_ms(), workers[i]->get_tot_usleep()/1000, workers[i]->get_queue_full_times()/1000);
+        printf("Thread %ld: used slots %d/%d (%04.02f%%) T:%d ms S:%d ms Q:%d\n", i, used_slots, ADDR_SLOTS, ((double)used_slots*100.0)/(double)(ADDR_SLOTS), workers[i]->get_elapsed_ms(), workers[i]->get_tot_usleep()/1000, workers[i]->get_queue_full_times()/1000);
     }
     printf("\n> threads: %d\n", MAX_THREADS);
     printf("> address table: %ld MB\n", (ADDR_TABLE_SIZE * ADDR_TABLE_ELEMENT_SIZE * MAX_THREADS)>>20);
@@ -176,3 +196,4 @@ int main() {
 
     return 0;
 }
+#endif

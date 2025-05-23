@@ -237,6 +237,7 @@ public:
         if (rows_available == 0) {
             open_segment(0);
         }
+        // TODO: REVIEW
         // add_chunk_to_segment(current_chunk, addr, rows, skip);
         rows_available -= row_count;
     }

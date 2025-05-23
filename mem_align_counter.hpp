@@ -3,6 +3,7 @@
 
 #include "mem_config.hpp"
 #include "mem_types.hpp"
+#include "mem_context.hpp"
 #include "tools.hpp"
 #include <vector>
 
@@ -18,7 +19,7 @@ public:
 
 class MemAlignCounter {
 private:
-    const MemCountTrace *mcp;
+    MemContext *context;
     MemAlignCheckPoint *current_cp;
     std::vector<MemAlignCheckPoint *> checkpoints;
     uint32_t count;
@@ -27,11 +28,10 @@ private:
     uint32_t skip;
     uint32_t last_chunk_id;
     uint32_t rows;
-    uint64_t init;
-    uint32_t ellapsed_ms;
+    uint32_t elapsed_ms;
 public:
     uint32_t last_addr[MAX_PAGES];
-    MemAlignCounter(uint32_t rows, const MemCountTrace *mcp, uint64_t init) :mcp(mcp), rows(rows), init(init) {
+    MemAlignCounter(uint32_t rows, MemContext *context) :context(context), rows(rows) {
         count = 0;
         available_rows = rows;
         skip = 0;
@@ -81,33 +81,31 @@ public:
     uint32_t get_instances_count() {
         return checkpoints.size();
     }
-    uint32_t get_ellapsed_ms() {
-        return ellapsed_ms;
+    uint32_t get_elapsed_ms() {
+        return elapsed_ms;
     }
 };
 
 void MemAlignCounter::execute() {
-    const int chunks = mcp->chunks;
-    for (int j = 0; j < chunks; ++j) {
-        const uint32_t chunk_size = mcp->chunk_size[j];
-        const MemCountersBusData *chunk_data = mcp->chunk_data[j];
+    const MemChunk *chunk;
+    uint32_t chunk_id = 0;
+    uint64_t init = get_usec();
+    while ((chunk = context->get_chunk(chunk_id)) != nullptr) {
+        const uint32_t chunk_size = chunk->count;
+        const MemCountersBusData *chunk_data = chunk->data;
         for (uint32_t i = 0; i < chunk_size; i++) {
             const uint8_t bytes = chunk_data[i].flags & 0xFF;
             const uint32_t addr = chunk_data[i].addr;
             if (bytes != 8 || (addr & 0x07) != 0) {
                 uint32_t ops = ((bytes + (addr & 0x07)) > 8) ? 2:1 * (1 + (chunk_data[i].flags >> 16)) + 1;
-                add_mem_align_op(j, ops);
+                add_mem_align_op(chunk_id, ops);
             }
         }
         close_chunk();
-        uint64_t next_chunk = init + (uint64_t)(j+1) * TIME_US_BY_CHUNK;
-        uint64_t current = get_usec();
-        if (current < next_chunk) {
-            usleep(next_chunk - current);
-        }
+        ++chunk_id;
     }
     close_checkpoint(true);
-    ellapsed_ms = ((get_usec() - init) / 1000);
+    elapsed_ms = ((get_usec() - init) / 1000);
 }
 
 #endif // __MEM_ALIGN_COUNTER_HPP__
