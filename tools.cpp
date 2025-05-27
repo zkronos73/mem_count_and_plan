@@ -65,7 +65,11 @@ MemCountersBusData *compact_and_save(int chunk, BusDataChunk* chunk_data, int co
     MemCountersBusData *out_data = (MemCountersBusData *)malloc(size);
     for (int i = 0; i < count; ++i) {
         out_data[i].addr = chunk_data[i].data[1];
+        #ifdef MEM_COUNT_DATA_V2
+        out_data[i].flags = chunk_data[i].data[3] << 28  + ((chunk_data[i].data[0] - 1) << 27);
+        #else
         out_data[i].flags = chunk_data[i].data[3] + ((chunk_data[i].data[0] - 1) << 16);
+        #endif
     }
     char filename[256];
     snprintf(filename, sizeof(filename), "../bus_data/mem_count_data/mem_count_data_%d.bin", chunk);

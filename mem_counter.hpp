@@ -109,7 +109,7 @@ public:
         current_chunk = chunk_id;
 
         for (const MemCountersBusData *chunk_eod = chunk_data + chunk_size; chunk_eod != chunk_data; chunk_data++) {
-            const uint8_t bytes = chunk_data->flags & 0xFF;
+            const uint32_t bytes = get_bytes_from_flags(chunk_data->flags);
             const uint32_t addr = chunk_data->addr;
             if (bytes == 8 && (addr & 0x07) == 0) {
                 // aligned access
@@ -121,15 +121,29 @@ public:
                 const uint32_t aligned_addr = addr & 0xFFFFFFF8;
 
                 if ((aligned_addr & ADDR_MASK) == addr_mask) {
-                    const int ops = 1 + (chunk_data->flags >> 16);
+                    const int ops = 1 + get_wr_from_flags(chunk_data->flags);
                     count_aligned(aligned_addr, chunk_id, ops);
                 }
                 else if ((bytes + (addr & 0x07)) > 8 && ((aligned_addr + 8) & ADDR_MASK) == addr_mask) {
-                    const int ops = 1 + (chunk_data->flags >> 16);
+                    const int ops = 1 + get_wr_from_flags(chunk_data->flags);
                     count_aligned(aligned_addr + 8 , chunk_id, ops);
                 }
             }
         }
+    }
+    inline uint32_t get_wr_from_flags (uint32_t flags) {
+        #ifdef MEM_COUNT_DATA_V2
+        return ((0x1000 & flags) ? 1 : 0);
+        #else
+        return ((0x08000000 & flags) ? 1 : 0);
+        #endif
+    }
+    inline uint32_t get_bytes_from_flags (uint32_t flags) {
+        #ifdef MEM_COUNT_DATA_V2
+        return flags >> 28;
+        #else
+        return flags & 0xFF;
+        #endif
     }
     inline uint32_t get_initial_block_pos(uint32_t pos) {
         uint32_t tpos = pos & ADDR_SLOT_MASK;

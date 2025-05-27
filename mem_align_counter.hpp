@@ -94,10 +94,19 @@ void MemAlignCounter::execute() {
         const uint32_t chunk_size = chunk->count;
         const MemCountersBusData *chunk_data = chunk->data;
         for (uint32_t i = 0; i < chunk_size; i++) {
+            #ifdef MEM_COUNT_DATA_V2
+            const uint8_t bytes = chunk_data[i].flags >> 28;
+            #else
             const uint8_t bytes = chunk_data[i].flags & 0xFF;
+            #endif
             const uint32_t addr = chunk_data[i].addr;
             if (bytes != 8 || (addr & 0x07) != 0) {
-                uint32_t ops = ((bytes + (addr & 0x07)) > 8) ? 2:1 * (1 + (chunk_data[i].flags >> 16)) + 1;
+                #ifdef MEM_COUNT_DATA_V2
+                const uint32_t wr = (0x1000 & chunk_data[i].flags) ? 1 : 0;
+                #else
+                const uint32_t wr = (0x08000000 & chunk_data[i].flags) ? 1 : 0;
+                #endif
+                uint32_t ops = (((bytes + (addr & 0x07)) > 8) ? 2:1) * (1 + wr) + 1;
                 add_mem_align_op(chunk_id, ops);
             }
         }
