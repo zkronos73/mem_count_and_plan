@@ -18,6 +18,41 @@ inline uint64_t get_usec() {
     return (uint64_t)tv.tv_sec * 1000000 + tv.tv_usec;
 }
 
+inline int load_from_file(size_t chunk_id, BusDataChunk** chunk) {
+    char filename[256];
+    snprintf(filename, sizeof(filename), "../bus_data2/mem_%ld.bin", chunk_id);
+    int fd = open(filename, O_RDONLY);
+    if (fd < 0) {
+        return -1;
+    }
+    struct stat st;
+    if (fstat(fd, &st) < 0) {
+        perror("Error getting file size");
+        close(fd);
+        return -1;
+    }
+    int chunk_size = st.st_size / sizeof(BusDataChunk);
+    int size = sizeof(BusDataChunk) * chunk_size;
+    *chunk = (BusDataChunk *)malloc(size);
+    if (*chunk == NULL) {
+        perror("Error allocating memory");
+        close(fd);
+        return -1;
+    }
+    ssize_t bytes_read = read(fd, *chunk, size);
+    if (bytes_read < 0) {
+        perror("Error reading file");
+        free(*chunk);
+        close(fd);
+        return -1;
+    }
+    close(fd);
+    if (bytes_read != size) {
+        fprintf(stderr, "Warning: Read %zd bytes, expected %d bytes\n", bytes_read, size);
+    }
+    return chunk_size;
+}
+
 inline int32_t load_from_compact_file(size_t chunk_id, MemCountersBusData** chunk) {
     char filename[256];
     snprintf(filename, sizeof(filename), "../bus_data/mem_count_data/mem_count_data_%ld.bin", chunk_id);

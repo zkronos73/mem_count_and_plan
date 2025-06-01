@@ -7,6 +7,7 @@
 #define MEM_PLANNER_STATS
 #define MEM_COUNT_DATA_V2
 // #define SPLITTED_CHUNKS
+#define MAX_MEM_OPS_BY_MAIN_STEP 512 // precompiled
 
 #define MEM_CHECK_POINT_MAP
 #define SEGMENT_STATS
