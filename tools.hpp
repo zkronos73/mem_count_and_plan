@@ -78,4 +78,18 @@ inline uint32_t count_operations(MemCountersBusData *chunk_data, int count) {
     return ops;
 }
 
+inline uint32_t get_wr_from_flags (uint32_t flags) {
+    #ifdef MEM_COUNT_DATA_V2
+    return ((0x1000 & flags) ? 1 : 0);
+    #else
+    return ((0x08000000 & flags) ? 1 : 0);
+    #endif
+}
+inline uint32_t get_bytes_from_flags (uint32_t flags) {
+    #ifdef MEM_COUNT_DATA_V2
+    return flags >> 28;
+    #else
+    return flags & 0xFF;
+    #endif
+}
 #endif

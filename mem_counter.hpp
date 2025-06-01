@@ -99,7 +99,11 @@ public:
         uint64_t init = get_usec();
         const MemChunk *chunk;
         uint32_t chunk_id = 0;
+        #ifdef SPLITTED_CHUNKS
+        while ((chunk = context->get_chunk(id, chunk_id)) != nullptr) {
+        #else
         while ((chunk = context->get_chunk(chunk_id)) != nullptr) {
+        #endif
             execute_chunk(chunk_id, chunk->data, chunk->count);
             ++chunk_id;
         }
@@ -130,20 +134,6 @@ public:
                 }
             }
         }
-    }
-    inline uint32_t get_wr_from_flags (uint32_t flags) {
-        #ifdef MEM_COUNT_DATA_V2
-        return ((0x1000 & flags) ? 1 : 0);
-        #else
-        return ((0x08000000 & flags) ? 1 : 0);
-        #endif
-    }
-    inline uint32_t get_bytes_from_flags (uint32_t flags) {
-        #ifdef MEM_COUNT_DATA_V2
-        return flags >> 28;
-        #else
-        return flags & 0xFF;
-        #endif
     }
     inline uint32_t get_initial_block_pos(uint32_t pos) {
         uint32_t tpos = pos & ADDR_SLOT_MASK;

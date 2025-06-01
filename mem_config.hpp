@@ -6,6 +6,7 @@
 #define USE_ADDR_COUNT_TABLE
 #define MEM_PLANNER_STATS
 #define MEM_COUNT_DATA_V2
+// #define SPLITTED_CHUNKS
 
 #define MEM_CHECK_POINT_MAP
 #define SEGMENT_STATS
@@ -18,7 +19,8 @@
 #define THREAD_BITS 3
 #define ADDR_LOW_BITS (THREAD_BITS + 3)
 #define MAX_THREADS (1 << THREAD_BITS)
-#define ADDR_MASK ((MAX_THREADS - 1) * 8)
+#define ADDR_W_MASK (MAX_THREADS - 1)
+#define ADDR_MASK (ADDR_W_MASK * 8)
 
 #define MAX_PAGES 20
 #define ADDR_PAGE_BITS (23 - THREAD_BITS)

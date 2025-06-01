@@ -90,13 +90,19 @@ public:
         printf("Prepared MemCountAndPlan\n");
         t_prepare_us = get_usec() - init;
     }
+    #ifdef SPLITTED_CHUNKS
+    void add_chunk(MemCountersBusData **chunk_data, uint32_t *chunk_size) {
+        context->add_chunk(chunk_data, chunk_size);
+    }
+    #else
     void add_chunk(MemCountersBusData *chunk_data, uint32_t chunk_size) {
         context->add_chunk(chunk_data, chunk_size);
     }
+    #endif
     void detach_execute() {
-        // printf("MemCountAndPlan::count_phase\n");
+        printf("MemCountAndPlan::count_phase\n");
         count_phase();
-        // printf("MemCountAndPlan::plan_phase\n");
+        printf("MemCountAndPlan::plan_phase\n");
         plan_phase();
     }
     void execute(void) {
@@ -186,9 +192,15 @@ void execute_mem_count_and_plan(MemCountAndPlan *mcp) {
     mcp->execute();
 }
 
+#ifdef SPLITTED_CHUNKS
+void add_chunk_mem_count_and_plan(MemCountAndPlan *mcp, MemCountersBusData **chunk_data, uint32_t *chunk_size) {
+    mcp->add_chunk(chunk_data, chunk_size);
+}
+#else
 void add_chunk_mem_count_and_plan(MemCountAndPlan *mcp, MemCountersBusData *chunk_data, uint32_t chunk_size) {
     mcp->add_chunk(chunk_data, chunk_size);
 }
+#endif
 
 void stats_mem_count_and_plan(MemCountAndPlan *mcp) {
     mcp->stats();

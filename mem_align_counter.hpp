@@ -90,7 +90,11 @@ void MemAlignCounter::execute() {
     const MemChunk *chunk;
     uint32_t chunk_id = 0;
     uint64_t init = get_usec();
+    #ifdef SPLITTED_CHUNKS
+    while ((chunk = context->get_chunk(MAX_THREADS, chunk_id)) != nullptr) {
+    #else
     while ((chunk = context->get_chunk(chunk_id)) != nullptr) {
+    #endif
         const uint32_t chunk_size = chunk->count;
         const MemCountersBusData *chunk_data = chunk->data;
         for (uint32_t i = 0; i < chunk_size; i++) {
