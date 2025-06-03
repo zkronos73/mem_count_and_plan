@@ -20,7 +20,7 @@ inline uint64_t get_usec() {
 
 inline int32_t load_from_compact_file(size_t chunk_id, MemCountersBusData** chunk) {
     char filename[256];
-    snprintf(filename, sizeof(filename), "../bus_data/mem_count_data/mem_count_data_%ld.bin", chunk_id);
+    snprintf(filename, sizeof(filename), "../bus_data.org/mem_count_data/mem_count_data_%ld.bin", chunk_id);
     int fd = open(filename, O_RDONLY);
     if (fd < 0) {
         return -1;

@@ -111,22 +111,24 @@ public:
         for (const MemCountersBusData *chunk_eod = chunk_data + chunk_size; chunk_eod != chunk_data; chunk_data++) {
             const uint8_t bytes = chunk_data->flags & 0xFF;
             const uint32_t addr = chunk_data->addr;
+            if (chunk_id == 1791 && addr >= 0xA7FFB780 && addr <= 0xA7FFB798) {
+                printf("##5 Thread %d addr 0x%08X & 0x%08X = 0x%08X ? 0x%08X bytes %d\n", id, addr, ADDR_MASK, addr & ADDR_MASK, addr_mask, bytes);
+            }
             if (bytes == 8 && (addr & 0x07) == 0) {
                 // aligned access
                 if ((addr & ADDR_MASK) != addr_mask) {
                     continue;
                 }
-                count_aligned(addr, chunk_id, 1);
+                count_aligned(addr, chunk_id, 1, 0);
             } else {
                 const uint32_t aligned_addr = addr & 0xFFFFFFF8;
-
                 if ((aligned_addr & ADDR_MASK) == addr_mask) {
                     const int ops = 1 + (chunk_data->flags >> 16);
-                    count_aligned(aligned_addr, chunk_id, ops);
+                    count_aligned(aligned_addr, chunk_id, ops, 1);
                 }
                 else if ((bytes + (addr & 0x07)) > 8 && ((aligned_addr + 8) & ADDR_MASK) == addr_mask) {
                     const int ops = 1 + (chunk_data->flags >> 16);
-                    count_aligned(aligned_addr + 8 , chunk_id, ops);
+                    count_aligned(aligned_addr + 8 , chunk_id, ops, 2);
                 }
             }
         }
@@ -201,13 +203,16 @@ public:
         }
         return (free_slot++) * ADDR_SLOT_SIZE;
     }
-    inline void count_aligned(uint32_t addr, uint32_t chunk_id, uint32_t count) {
+    inline void count_aligned(uint32_t addr, uint32_t chunk_id, uint32_t count, uint32_t debug_id = 0) {
         uint32_t offset = addr_to_offset(addr, current_chunk);
         #ifdef USE_ADDR_COUNT_TABLE
         uint32_t pos = addr_count_table[offset].pos;
         #else
         uint32_t pos = addr_table[offset];
         #endif
+        if (chunk_id == 1791 && addr >= 0xA7FFB780 && addr <= 0xA7FFB798) {
+            printf("##8 Thread %d count_aligned addr 0x%08X chunk_id %d count %d pos %d offset %d debug %d\n", id, addr, chunk_id, count, pos, offset, debug_id);
+        }
         if (pos == 0) {
             uint32_t pos = get_next_slot_pos();
             addr_slots[pos] = 0;

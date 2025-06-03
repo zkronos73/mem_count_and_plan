@@ -182,9 +182,9 @@ public:
         close_segment(false);
         if (reference_addr_chunk != NO_CHUNK_ID) {
             #ifdef MEM_CHECK_POINT_MAP
-            current_segment->add_or_update(reference_addr_chunk, reference_addr, 0, reference_skip);
+            current_segment->add_or_update(reference_addr_chunk, reference_addr, reference_skip, 0);
             #else
-            current_segment->add_or_update(hash_table, reference_addr_chunk, reference_addr, 0, reference_skip);
+            current_segment->add_or_update(hash_table, reference_addr_chunk, reference_addr, reference_skip, 0);
             #endif
         }
         rows_available = rows;
@@ -195,9 +195,9 @@ public:
     }
     void add_chunk_to_segment(uint32_t chunk_id, uint32_t addr, uint32_t count, uint32_t skip) {
             #ifdef MEM_CHECK_POINT_MAP
-        current_segment->add_or_update(chunk_id, addr, count, skip);
+        current_segment->add_or_update(chunk_id, addr, skip, count);
             #else
-        current_segment->add_or_update(hash_table, chunk_id, addr, count, skip);
+        current_segment->add_or_update(hash_table, chunk_id, addr, skip, count);
             #endif
     }
     void preopen_segment(uint32_t addr, uint32_t intermediate_rows) {

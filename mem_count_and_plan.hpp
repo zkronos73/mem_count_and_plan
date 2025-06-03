@@ -29,6 +29,7 @@
 #include "mem_locator.hpp"
 #include "mem_context.hpp"
 #include "immutable_mem_planner.hpp"
+#include "mem_segments.hpp"
 
 typedef struct {
     int thread_index;
@@ -125,13 +126,15 @@ public:
         plan_threads.emplace_back([this](){ quick_mem_planner->generate_locators(count_workers, context->locators);});
         plan_threads.emplace_back([this](){ rom_data_planner->execute(count_workers);});
         plan_threads.emplace_back([this](){ input_data_planner->execute(count_workers);});
+        MemSegments segments;
         for (int i = 0; i < MAX_MEM_PLANNERS; ++i) {
-            threads.emplace_back([this, i](){ plan_workers[i].execute_from_locators(count_workers, context->locators);});
+            threads.emplace_back([this, i, &segments](){ plan_workers[i].execute_from_locators(count_workers, context->locators, segments);});
         }
         for (auto& t : threads) {
             t.join();
         }
         t_plan_us = (uint32_t) (get_usec() - init);
+        segments.debug();
     }
     void stats() {
         uint32_t tot_used_slots = 0;

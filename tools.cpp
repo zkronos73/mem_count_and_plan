@@ -26,7 +26,7 @@ typedef struct {
 
 int load_from_file(size_t chunk_id, BusDataChunk** chunk) {
     char filename[256];
-    snprintf(filename, sizeof(filename), "../bus_data/mem_%ld.bin", chunk_id);
+    snprintf(filename, sizeof(filename), "../bus_data2/mem_%ld.bin", chunk_id);
     int fd = open(filename, O_RDONLY);
     if (fd < 0) {
         return -1;

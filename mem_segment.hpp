@@ -104,13 +104,14 @@ class MemSegment {
     #else
     std::vector<MemCheckPoint> chunks;
     #endif
+    bool debug_enabled;
 public:
     bool is_last_segment;
     #ifdef MEM_CHECK_POINT_MAP
-    MemSegment() : is_last_segment(false) {
+    MemSegment() : debug_enabled(false), is_last_segment(false) {
         // chunks.reserve(4096);
     }
-    MemSegment(uint32_t chunk_id, uint32_t from_addr, uint32_t skip, uint32_t count) {
+    MemSegment(uint32_t chunk_id, uint32_t from_addr, uint32_t skip, uint32_t count, bool debug = false):debug_enabled(debug) {
         // chunks.reserve(4096);
         add_or_update(chunk_id, from_addr, skip, count);
     }
@@ -127,7 +128,7 @@ public:
     #endif
     #ifdef MEM_CHECK_POINT_MAP
     void push(uint32_t chunk_id, uint32_t from_addr, uint32_t skip, uint32_t count) {
-        chunks.try_emplace(chunk_id, from_addr, skip, count);
+        chunks.try_emplace(chunk_id, chunk_id, from_addr, skip, count);
     }
     #else
     void push(MemSegmentHashTable *hash_table, uint32_t chunk_id, uint32_t from_addr, uint32_t skip, uint32_t count) {
@@ -138,14 +139,17 @@ public:
     #endif
 
     #ifdef MEM_CHECK_POINT_MAP
-    void add_or_update(uint32_t chunk_id, uint32_t from_addr, uint32_t count, uint32_t skip = 0) {
-        auto result = chunks.try_emplace(chunk_id, std::move(MemCheckPoint(from_addr, 0, count)));
+    void add_or_update(uint32_t chunk_id, uint32_t from_addr, uint32_t skip, uint32_t count ) {
+        auto result = chunks.try_emplace(chunk_id, std::move(MemCheckPoint(chunk_id, from_addr, skip, count)));
+        if (debug_enabled) {
+            printf("add_or_update chunk_id: %d from_addr: 0x%08X count: %d skip: %d result:%d\n", chunk_id, from_addr, count, skip, result.second);
+        }
         if (!result.second) {
             result.first->second.add_rows(from_addr, count);
         }
     }
     #else
-    void add_or_update(MemSegmentHashTable *hash_table, uint32_t chunk_id, uint32_t from_addr, uint32_t count, uint32_t skip = 0) {
+    void add_or_update(MemSegmentHashTable *hash_table, uint32_t chunk_id, uint32_t from_addr, uint32_t skip = 0, uint32_t count) {
         uint32_t index = hash_table->get(chunk_id);
         if (index == MEM_SEGMENT_HASH_TABLE_KEY_NOT_FOUND) {
             push(hash_table, chunk_id, from_addr, skip, count);
@@ -156,6 +160,14 @@ public:
     #endif
     uint32_t size() const {
         return chunks.size();
+    }
+    void debug(uint32_t segment_id = 0) {
+        for (const auto &[chunk_id, chunk] : chunks) {
+            #ifdef MEM_CHECK_POINT_MAP
+            printf("#%d@%d [0x%08X s:%d] [0x%08X C:%d] C:%d\n", segment_id, chunk_id, chunk.from_addr, chunk.from_skip,
+                   chunk.to_addr, chunk.to_count, chunk.count);
+            #endif
+        }
     }
 };
 
