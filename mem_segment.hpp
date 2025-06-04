@@ -104,16 +104,17 @@ class MemSegment {
     #else
     std::vector<MemCheckPoint> chunks;
     #endif
-    bool debug_enabled;
 public:
+    uint32_t tot_count;
     bool is_last_segment;
     #ifdef MEM_CHECK_POINT_MAP
-    MemSegment() : debug_enabled(false), is_last_segment(false) {
+    MemSegment() : tot_count(0), is_last_segment(false) {
         // chunks.reserve(4096);
     }
-    MemSegment(uint32_t chunk_id, uint32_t from_addr, uint32_t skip, uint32_t count, bool debug = false):debug_enabled(debug) {
+    MemSegment(uint32_t chunk_id, uint32_t from_addr, uint32_t skip, uint32_t count): tot_count(0), is_last_segment(false) {
         // chunks.reserve(4096);
         add_or_update(chunk_id, from_addr, skip, count);
+        tot_count += count;
     }
     #else
     MemSegment(MemSegmentHashTable *hash_table) : is_last_segment(false) {
@@ -128,7 +129,8 @@ public:
     #endif
     #ifdef MEM_CHECK_POINT_MAP
     void push(uint32_t chunk_id, uint32_t from_addr, uint32_t skip, uint32_t count) {
-        chunks.try_emplace(chunk_id, chunk_id, from_addr, skip, count);
+        chunks.try_emplace(chunk_id, chunk_id, from_addr, skip, count, tot_count);
+        tot_count += count;
     }
     #else
     void push(MemSegmentHashTable *hash_table, uint32_t chunk_id, uint32_t from_addr, uint32_t skip, uint32_t count) {
@@ -140,10 +142,13 @@ public:
 
     #ifdef MEM_CHECK_POINT_MAP
     void add_or_update(uint32_t chunk_id, uint32_t from_addr, uint32_t skip, uint32_t count ) {
-        auto result = chunks.try_emplace(chunk_id, std::move(MemCheckPoint(chunk_id, from_addr, skip, count)));
+        auto result = chunks.try_emplace(chunk_id, std::move(MemCheckPoint(chunk_id, from_addr, skip, count, tot_count)));
+        tot_count += count;
+        #ifdef DEBUG_INFO
         if (debug_enabled) {
             printf("add_or_update chunk_id: %d from_addr: 0x%08X count: %d skip: %d result:%d\n", chunk_id, from_addr, count, skip, result.second);
         }
+        #endif
         if (!result.second) {
             result.first->second.add_rows(from_addr, count);
         }
@@ -164,8 +169,8 @@ public:
     void debug(uint32_t segment_id = 0) {
         for (const auto &[chunk_id, chunk] : chunks) {
             #ifdef MEM_CHECK_POINT_MAP
-            printf("#%d@%d [0x%08X s:%d] [0x%08X C:%d] C:%d\n", segment_id, chunk_id, chunk.from_addr, chunk.from_skip,
-                   chunk.to_addr, chunk.to_count, chunk.count);
+            printf("#%d@%d [0x%08X s:%d] [0x%08X C:%d] C:%d R:%d FC:%d\n", segment_id, chunk_id, chunk.from_addr, chunk.from_skip,
+                chunk.to_addr, chunk.to_count, chunk.count, chunk.debug_row, chunk.from_count);
             #endif
         }
     }

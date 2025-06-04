@@ -137,10 +137,10 @@ public:
             if ((locator = get_next_locator(locators, segment_id)) == nullptr) {
                 break;
             }
-            printf("EXECUTE_FROM_LOCATOR segment %d thread_index %d offset %d (0x%08X) cpos %d chunk %d skip %d\n", 
-                segment_id, locator->thread_index, locator->offset, 
-                MemCounter::offset_to_addr(locator->offset, locator->thread_index), 
-                locator->cpos, workers[locator->thread_index]->get_pos_value(locator->cpos), locator->skip);
+            // printf("EXECUTE_FROM_LOCATOR segment %d thread_index %d offset %d (0x%08X) cpos %d chunk %d skip %d\n", 
+            //     segment_id, locator->thread_index, locator->offset, 
+            //     MemCounter::offset_to_addr(locator->offset, locator->thread_index), 
+            //     locator->cpos, workers[locator->thread_index]->get_pos_value(locator->cpos), locator->skip);
             execute_from_locator(workers, segment_id, locator);
             // current_segment->close();
             segments.set(segment_id, current_segment);
@@ -189,17 +189,17 @@ public:
                         skip = 0;      
                         cpos = workers[thread_index]->get_initial_pos(pos); 
                     } else {
-                        printf("FIRST_POS segment %d thread_index %d offset %d (0x%08X/0x%08X) cpos %d chunk %d skip %d\n", 
-                            segment_id, thread_index, offset, MemCounter::offset_to_addr(offset, thread_index), 
-                            addr, cpos, workers[thread_index]->get_pos_value(cpos), skip);
+                        // printf("FIRST_POS segment %d thread_index %d offset %d (0x%08X/0x%08X) cpos %d chunk %d skip %d\n", 
+                        //     segment_id, thread_index, offset, MemCounter::offset_to_addr(offset, thread_index), 
+                        //     addr, cpos, workers[thread_index]->get_pos_value(cpos), skip);
                     }
                     while (cpos != 0) {
                         uint32_t chunk_id = workers[thread_index]->get_pos_value(cpos);
                         uint32_t count = workers[thread_index]->get_pos_value(cpos+1);
-                        if ((segment_id == 59) || skip > count) {
-                            printf("###3 Thread %d segment_id %d execute_from_locator addr 0x%08X/0x%08X count %d first_pos %d skip %d cpos %d chunk_id %d\n",
-                                   thread_index, segment_id, MemCounter::offset_to_addr(offset, thread_index), addr, count, first_pos, skip, cpos, chunk_id);
-                        }
+                        // if ((segment_id == 59) || skip > count) {
+                        //     printf("###3 Thread %d segment_id %d execute_from_locator addr 0x%08X/0x%08X count %d first_pos %d skip %d cpos %d chunk_id %d\n",
+                        //            thread_index, segment_id, MemCounter::offset_to_addr(offset, thread_index), addr, count, first_pos, skip, cpos, chunk_id);
+                        // }
                         if (skip > count) {
                             printf("*********** ERROR Thread %d segment_id %d skip %d > count %d 0x%08X/0x%08X first_pos %d\n", thread_index, segment_id, skip, count, MemCounter::offset_to_addr(offset, thread_index), addr, first_pos);
                         }
@@ -238,7 +238,7 @@ public:
         uint32_t offset, max_offset;
         bool inserted_first_locator = false;
         for (uint32_t page = from_page; page < to_page; ++page) {
-            printf("page:0x%08X\n", page);
+            // printf("page:0x%08X\n", page);
             get_offset_limits(workers, page, offset, max_offset);
             for (;offset <= max_offset; ++offset) {
                 for (uint32_t thread_index = 0; thread_index < MAX_THREADS; ++thread_index) {
@@ -258,7 +258,7 @@ public:
                     while (true) {
                         uint32_t chunk_id = workers[thread_index]->get_pos_value(cpos);
                         count = workers[thread_index]->get_pos_value(cpos+1);
-                        printf("CHUNK_CONTENT %ld %d 0x%08X (%d) %d \n", locators.size() - 1, chunk_id, MemCounter::offset_to_addr(offset, thread_index), rows_available, count);
+                        // printf("CHUNK_CONTENT %ld %d 0x%08X (%d) %d \n", locators.size() - 1, chunk_id, MemCounter::offset_to_addr(offset, thread_index), rows_available, count);
                         uint32_t initial_count = count;
                         while (count > 0) {
                             if (rows_available > count) {
@@ -273,11 +273,11 @@ public:
                                 #endif
                                 count -= rows_available;
                                 uint32_t skip = initial_count - count;
-                                printf("PUSH LOCATOR segment %ld thread_index %d offset %d (0x%08X) cpos %d %d skip %d rows_available %d count %d\n", 
-                                    locators.size() - 1, thread_index, offset, MemCounter::offset_to_addr(offset, thread_index), cpos, workers[thread_index]->get_pos_value(cpos), skip, rows_available, count);
+                                // printf("PUSH LOCATOR segment %ld thread_index %d offset %d (0x%08X) cpos %d %d skip %d rows_available %d count %d\n", 
+                                //      locators.size() - 1, thread_index, offset, MemCounter::offset_to_addr(offset, thread_index), cpos, workers[thread_index]->get_pos_value(cpos), skip, rows_available, count);
                                 locators.push_locator(thread_index, offset, cpos, skip);
                                 rows_available = rows;
-                                printf("CHUNK_CONTENT %ld %d * 0x%08X (%d) %d \n", locators.size() - 1, chunk_id, MemCounter::offset_to_addr(offset, thread_index), rows_available, count);
+                                // printf("CHUNK_CONTENT %ld %d * 0x%08X (%d) %d \n", locators.size() - 1, chunk_id, MemCounter::offset_to_addr(offset, thread_index), rows_available, count);
                             }
                         }
                         if (pos == cpos) break;
@@ -309,12 +309,7 @@ public:
             // include first chunk
             uint32_t consumed = std::min(count, rows);
             #ifdef MEM_CHECK_POINT_MAP
-            if (chunk_id == 728 && addr >= 0xA0000100 && addr <= 0xA0020610) {
-                printf("##4 Thread %d new_segment addr 0x%08X skip %d consumed %d\n", id, addr, skip, consumed);
-                current_segment = new MemSegment(chunk_id, addr, skip, consumed, true);
-            } else {
-                current_segment = new MemSegment(chunk_id, addr, skip, consumed);
-            }
+            current_segment = new MemSegment(chunk_id, addr, skip, consumed);
             #else
             current_segment = new MemSegment(hash_table, chunk_id, addr, skip, consumed);
             #endif

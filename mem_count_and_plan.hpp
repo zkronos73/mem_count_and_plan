@@ -79,14 +79,14 @@ public:
         mem_align_counter = new MemAlignCounter(MEM_ALIGN_ROWS, context);
         plan_workers.clear();
         printf("Preparing MemCountAndPlan (rom_data_planner)...\n");
-        rom_data_planner = new ImmutableMemPlanner(MEM_ROWS, 0x80000000, 128);
+        rom_data_planner = new ImmutableMemPlanner(ROM_ROWS, 0x80000000, 128);
         printf("Preparing MemCountAndPlan (input_data_planner)...\n");
-        input_data_planner = new ImmutableMemPlanner(MEM_ROWS, 0x90000000, 128);
+        input_data_planner = new ImmutableMemPlanner(INPUT_ROWS, 0x90000000, 128);
         printf("Preparing MemCountAndPlan (quick_mem_planner)...\n");
-        quick_mem_planner = new MemPlanner(0, MEM_ROWS, 0xA0000000, 512);
+        quick_mem_planner = new MemPlanner(0, RAM_ROWS, 0xA0000000, 512);
         printf("Preparing MemCountAndPlan (planners)...\n");
         for (int i = 0; i < MAX_MEM_PLANNERS; ++i) {
-            plan_workers.emplace_back(i+1, MEM_ROWS, 0xA0000000, 512);
+            plan_workers.emplace_back(i+1, RAM_ROWS, 0xA0000000, 512);
         }
         printf("Prepared MemCountAndPlan\n");
         t_prepare_us = get_usec() - init;
@@ -126,17 +126,30 @@ public:
         plan_threads.emplace_back([this](){ quick_mem_planner->generate_locators(count_workers, context->locators);});
         plan_threads.emplace_back([this](){ rom_data_planner->execute(count_workers);});
         plan_threads.emplace_back([this](){ input_data_planner->execute(count_workers);});
-        MemSegments segments;
+        MemSegments ram_segments;
         for (int i = 0; i < MAX_MEM_PLANNERS; ++i) {
-            threads.emplace_back([this, i, &segments](){ plan_workers[i].execute_from_locators(count_workers, context->locators, segments);});
+            threads.emplace_back([this, i, &ram_segments](){ plan_workers[i].execute_from_locators(count_workers, context->locators, ram_segments);});
         }
         for (auto& t : threads) {
             t.join();
         }
+        for (auto& t : plan_threads) {
+            t.join();
+        }
         t_plan_us = (uint32_t) (get_usec() - init);
-        segments.debug();
+
+        MemSegments rom_segments;
+        rom_data_planner->collect_segments(rom_segments);
+
+        MemSegments input_segments;
+        input_data_planner->collect_segments(input_segments);
+        ram_segments.debug();
+        rom_segments.debug();
+        input_segments.debug();
+        mem_align_counter->debug();
     }
     void stats() {
+        printf("==== STATS ====\n");
         uint32_t tot_used_slots = 0;
         for (size_t i = 0; i < MAX_THREADS; ++i) {
             uint32_t used_slots = count_workers[i]->get_used_slots();

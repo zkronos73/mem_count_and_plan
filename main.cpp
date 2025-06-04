@@ -68,7 +68,7 @@ public:
     }
 };
 
-int main() {
+int main(int argc, const char *argv[]) {
     // printf("Starting...\n");
     // auto cp = create_mem_count_and_plan();
     // printf("Executing...\n");
@@ -78,7 +78,7 @@ int main() {
     //     sleep(5);
     // }
     MemTest mem_test;
-    mem_test.load();
+    mem_test.load(argc > 1 ? argv[1] : "../bus_data.org/mem_count_data");
     mem_test.execute();
     printf("END\n");
 }
@@ -163,12 +163,12 @@ int main2() {
 
     // std::vector<MemPlanner *> planners;
 
-    auto rom_data_planner = new ImmutableMemPlanner(MEM_ROWS, 0x80000000, 128);
-    auto input_data_planner = new ImmutableMemPlanner(MEM_ROWS, 0x90000000, 128);
+    auto rom_data_planner = new ImmutableMemPlanner(ROM_ROWS, 0x80000000, 128);
+    auto input_data_planner = new ImmutableMemPlanner(INPUT_ROWS, 0x90000000, 128);
     std::vector<MemPlanner> mem_planners;
-    auto mem_planner = new MemPlanner(0, MEM_ROWS, 0xA0000000, 512);
+    auto mem_planner = new MemPlanner(0, RAM_ROWS, 0xA0000000, 512);
     for (int i = 0; i < MAX_MEM_PLANNERS; ++i) {
-        mem_planners.emplace_back(i+1, MEM_ROWS, 0xA0000000, 512);
+        mem_planners.emplace_back(i+1, RAM_ROWS, 0xA0000000, 512);
     }
 
     MemLocators locators;

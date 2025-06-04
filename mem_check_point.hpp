@@ -12,8 +12,10 @@ class MemCheckPoint {
         uint32_t to_addr;
         uint32_t to_count;
         uint32_t count;
+        uint32_t from_count;
+        uint32_t debug_row;
         #ifdef MEM_CHECK_POINT_MAP
-        MemCheckPoint(uint32_t chunk_id, uint32_t from_addr, uint32_t skip, uint32_t count) :
+        MemCheckPoint(uint32_t chunk_id, uint32_t from_addr, uint32_t skip, uint32_t count, uint32_t debug_row = 0) :
         #else
         MemCheckPoint(uint32_t chunk_id, uint32_t from_addr, uint32_t skip, uint32_t count) : chunk_id(chunk_id),
         #endif
@@ -21,15 +23,22 @@ class MemCheckPoint {
             from_skip(skip),
             to_addr(from_addr),
             to_count(count),
-            count(count) {
+            count(count),
+            from_count(count),
+            debug_row(debug_row) {
+            #ifdef DEBUG_INFO
             if (chunk_id == 728 && from_addr == 0xA0000100) {
                 printf("### MemCheckPoint from_addr 0x%08X skip %d count %d\n", from_addr, skip, count);
             }
+            #endif
         }
         ~MemCheckPoint() {
         }
         void add_rows(uint32_t addr, uint32_t count) {
             this->count += count;
+            if (addr == from_addr) {
+                from_count += count;
+            }
             if (addr == to_addr) {
                 to_count += count;
             } else {
