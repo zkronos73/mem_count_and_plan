@@ -58,7 +58,7 @@ public:
                 uint32_t ops_by_addr = (chunk_data[i].flags & 0x10000) ? 2:1;
                 uint32_t ops = addr_count * ops_by_addr + 1;
                 add_mem_align_op(chunk_id, ops);
-                skip = skip + ops;
+                skip = skip + 1;
             }
         }
     }
