@@ -53,11 +53,24 @@ private:
 public:
     uint32_t first_offset[MAX_PAGES];
     uint32_t last_offset[MAX_PAGES];
+    uint32_t dual_ops;
+    #ifdef MEM_ALIGN_STATS
+    uint32_t mem_align_byte_reads;
+    uint32_t mem_align_byte_writes;
+    #endif
+
     MemCounter(uint32_t id, MemContext *context)
     :id(id), context(context), addr_mask(id * 8) {
         count = 0;
         queue_full = 0;
         tot_usleep = 0;
+        #ifdef DUAL_PORT_COUNT
+        dual_ops = 0;
+        #endif
+        #ifdef MEM_ALIGN_STATS
+        mem_align_byte_reads = 0;
+        mem_align_byte_writes = 0;
+        #endif
         #ifdef USE_ADDR_COUNT_TABLE
         addr_count_table = (AddrCount *)malloc(ADDR_TABLE_SIZE * sizeof(AddrCount));
         memset(addr_count_table, 0, ADDR_TABLE_SIZE * sizeof(AddrCount));
@@ -119,16 +132,37 @@ public:
                 if ((addr & ADDR_MASK) != addr_mask) {
                     continue;
                 }
-                count_aligned(addr, chunk_id, 1, 0);
+                #ifdef DUAL_PORT_COUNT
+                count_aligned(addr, chunk_id, 1,(chunk_data->flags >> 16), 0);
+                #else
+                count_aligned(addr, chunk_id, 1, 0, 0);
+                #endif
             } else {
                 const uint32_t aligned_addr = addr & 0xFFFFFFF8;
                 if ((aligned_addr & ADDR_MASK) == addr_mask) {
                     const int ops = 1 + (chunk_data->flags >> 16);
-                    count_aligned(aligned_addr, chunk_id, ops, 1);
+                    #ifdef DUAL_PORT_COUNT
+                    count_aligned(aligned_addr, chunk_id, ops, ops - 1, 1);
+                    #else
+                    count_aligned(aligned_addr, chunk_id, ops, 0, 1);
+                    #endif
+                    #ifdef MEM_ALIGN_STATS
+                    if (bytes == 1) {
+                        if (ops == 2) {
+                            mem_align_byte_writes += 1; 
+                        } else {
+                            mem_align_byte_reads += 1; 
+                        }
+                    }
+                    #endif
                 }
                 else if ((bytes + (addr & 0x07)) > 8 && ((aligned_addr + 8) & ADDR_MASK) == addr_mask) {
                     const int ops = 1 + (chunk_data->flags >> 16);
-                    count_aligned(aligned_addr + 8 , chunk_id, ops, 2);
+                    #ifdef DUAL_PORT_COUNT
+                    count_aligned(aligned_addr + 8 , chunk_id, ops, ops - 1, 2);
+                    #else
+                    count_aligned(aligned_addr + 8 , chunk_id, ops, 0, 2);
+                    #endif
                 }
             }
         }
@@ -195,6 +229,14 @@ public:
         return addr_table[index];
         #endif
     }
+    inline uint32_t get_dual_port_count() const {
+        // return count_table[index];
+        #ifdef DUAL_PORT_COUNT
+        return dual_ops;
+        #else
+        return 0;
+        #endif
+    }
     inline uint32_t get_next_slot_pos() {
         if (free_slot >= ADDR_SLOTS) {
             std::ostringstream msg;
@@ -203,7 +245,7 @@ public:
         }
         return (free_slot++) * ADDR_SLOT_SIZE;
     }
-    inline void count_aligned(uint32_t addr, uint32_t chunk_id, uint32_t count, uint32_t debug_id = 0) {
+    inline void count_aligned(uint32_t addr, uint32_t chunk_id, uint32_t count, uint32_t is_write = 0, uint32_t debug_id = 0) {
         uint32_t offset = addr_to_offset(addr, current_chunk);
         #ifdef USE_ADDR_COUNT_TABLE
         uint32_t pos = addr_count_table[offset].pos;
@@ -221,10 +263,15 @@ public:
             addr_slots[pos + 3] = count;
             #ifdef USE_ADDR_COUNT_TABLE
             addr_count_table[offset].pos = pos + 2;
+            #ifdef DUAL_PORT_COUNT
+            addr_count_table[offset].count = (is_write ? 0x80000000 : 0x40000000) | count;
+            #else
             addr_count_table[offset].count = count;
+            #endif
             #else
             addr_table[offset] = pos + 2;
             #endif
+            
             uint32_t page = offset >> ADDR_PAGE_BITS;
             first_offset[page] = std::min(first_offset[page], offset);
             last_offset[page] = std::max(last_offset[page], offset);
@@ -232,6 +279,37 @@ public:
         } else {
             #ifdef USE_ADDR_COUNT_TABLE
             addr_count_table[offset].count += count;
+            #ifdef DUAL_PORT_COUNT
+            uint32_t _count = addr_count_table[offset].count;
+            uint32_t st = _count >> 30;
+            switch (st) {
+                case 0: // initial
+                    if (is_write) {
+                        addr_count_table[offset].count = (_count & 0x3FFFFFFF) | 0x80000000;
+                    } else {
+                        addr_count_table[offset].count = (_count & 0x3FFFFFFF) | 0x40000000;
+                    }
+                    break;
+                case 1: // read
+                    if (!is_write) {
+                        addr_count_table[offset].count = (_count & 0x3FFFFFFF);
+                        // read-read
+                        ++dual_ops;
+                    }
+                    break;
+                case 2: // write
+                    if (!is_write) {
+                        addr_count_table[offset].count = (_count & 0x3FFFFFFF);
+                        // write-read
+                        ++dual_ops;
+                    }
+                    break;
+                default:
+                    std::ostringstream msg;
+                    msg << "ERROR: MemCounter dual port count error: " << st << " offset:" << offset << " chunk_id:" << chunk_id;
+                    throw std::runtime_error(msg.str());
+            }
+            #endif
             #endif
             if (addr_slots[pos] == chunk_id) {
                 addr_slots[pos + 1] += count;

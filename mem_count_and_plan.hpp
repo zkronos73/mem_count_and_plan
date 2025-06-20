@@ -151,6 +151,9 @@ public:
     void stats() {
         printf("==== STATS ====\n");
         uint32_t tot_used_slots = 0;
+        uint32_t dual_port_count = 0;
+        uint32_t mem_align_byte_reads = 0;
+        uint32_t mem_align_byte_writes = 0;
         for (size_t i = 0; i < MAX_THREADS; ++i) {
             uint32_t used_slots = count_workers[i]->get_used_slots();
             tot_used_slots += used_slots;
@@ -159,6 +162,10 @@ public:
                 ((double)used_slots*100.0)/(double)(ADDR_SLOTS), count_workers[i]->get_elapsed_ms(),
                 count_workers[i]->get_tot_usleep()/1000,
                 count_workers[i]->get_queue_full_times()/1000);
+            dual_port_count += count_workers[i]->dual_ops;
+            mem_align_byte_reads += count_workers[i]->mem_align_byte_reads;
+            mem_align_byte_writes += count_workers[i]->mem_align_byte_writes;
+
         }
         printf("\n> threads: %d\n", MAX_THREADS);
         printf("> address table: %ld MB\n", (ADDR_TABLE_SIZE * ADDR_TABLE_ELEMENT_SIZE * MAX_THREADS)>>20);
@@ -171,6 +178,9 @@ public:
         printf("execution: %04.2f ms\n", (TIME_US_BY_CHUNK * context->size()) / 1000.0);
         printf("count_phase: %04.2f ms\n", t_count_us / 1000.0);
         printf("plan_phase: %04.2f ms\n", t_plan_us / 1000.0);
+        printf("dual port: %d\n", dual_port_count);
+        printf("mem_align_byte_reads: %d\n", mem_align_byte_reads);
+        printf("mem_align_byte_writes: %d\n", mem_align_byte_writes);
     }
     void set_completed() {
         context->set_completed();
